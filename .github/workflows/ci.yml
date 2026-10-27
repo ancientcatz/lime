@@ -1,12 +1,12 @@
 name: CI
 
-# CI workflow: runs lint checks, unit tests, and builds both debug and release APKs on every
-# push to the working branch and on pull requests. Uploads the APKs as workflow artifacts
-# (downloadable from the Actions run page) but does NOT create a GitHub Release — that is
-# the responsibility of release.yml.
+# CI workflow: runs lint checks and unit tests, then builds both debug and release APKs on
+# every push to the working branch and on pull requests. Uploads the APKs as workflow
+# artifacts (downloadable from the Actions run page) but does NOT create a GitHub Release —
+# that is the responsibility of release.yml.
 #
-# The build is split into three concurrent jobs (validate, build-debug, build-release) that
-# run in parallel on separate runners.
+# The `validate` job (lint + unit tests) runs first. The `build-debug` and `build-release`
+# jobs run in parallel after `validate` succeeds.
 #
 # Artifact version format: v<versionName>-<short_commit_hash>
 #   e.g. lime-v1.4.0-d8a606e9ae19.apk (release)
@@ -24,10 +24,6 @@ on:
   pull_request:
     branches:
       - feat/npatch-libxposed-102
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -86,6 +82,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   build-debug:
     name: Build debug APK
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -159,6 +156,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   build-release:
     name: Build release APK
+    needs: validate
     runs-on: ubuntu-latest
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
