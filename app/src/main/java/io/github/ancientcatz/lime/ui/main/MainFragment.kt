@@ -86,8 +86,8 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
      * module's settings process when the module is enabled in NPatch (or LSPosed). If the binder
      * is held, the module is active. This replaces the legacy Java-level hook on
      * `MainFragment.isModuleActive` which never actually ran in production because the modern
-     * module is never injected into its own settings process (scope is `com.seleuco.mame4droid`
-     * only).
+     * module is never injected into its own settings process (scope is configurable via
+     * NPatch).
      */
     private fun isModuleActive(): Boolean = App.mService != null
 

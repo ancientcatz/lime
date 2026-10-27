@@ -28,8 +28,8 @@ import io.github.ancientcatz.lime.model.mapActivityOrientation
  *
  * Behavior change vs. legacy:
  *  - The legacy `MainFragment.isModuleActive` Java-level hook is removed. In the modern API the
- *    module is never injected into its own settings process (the scope is `com.seleuco.mame4droid`
- *    only), so that hook never actually ran in production. The modern equivalent — checking
+ *    module is never injected into its own settings process (scope is configurable via
+ *    NPatch), so that hook never actually ran in production. The modern equivalent — checking
  *    `App.mService != null` — is implemented in [io.github.ancientcatz.lime.ui.main.MainFragment].
  *  - Settings IPC uses [XposedInterface.getRemotePreferences] (read-only in hooked processes)
  *    instead of the legacy `XSharedPreferences` + `MODE_WORLD_READABLE` SharedPreferences, which
