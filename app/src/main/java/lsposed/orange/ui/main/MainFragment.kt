@@ -7,10 +7,12 @@ import android.view.MenuItem
 import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.SearchView
+import androidx.core.view.MenuProvider
 import androidx.core.view.isVisible
 import androidx.core.widget.ContentLoadingProgressBar
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import io.github.libxposed.service.XposedService
 import lsposed.orange.App
 import lsposed.orange.R
@@ -32,7 +34,14 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        setHasOptionsMenu(true)
+        // Modern menu API: register a MenuProvider with the activity's MenuHost instead of
+        // overriding the deprecated Fragment.onCreateOptionsMenu / Fragment.onOptionsItemSelected
+        // and calling Fragment.setHasOptionsMenu(true). AppCompatActivity implements MenuHost
+        // and routes menu inflation and item selection through our provider while this
+        // fragment's view is at least RESUMED. The provider is automatically removed when
+        // viewLifecycleOwner reaches DESTROYED, so there is no leak and no need to override
+        // onDestroyOptionsMenu.
+        requireActivity().addMenuProvider(menuProvider, viewLifecycleOwner, Lifecycle.State.RESUMED)
         val appListView = view.findViewById<RecordScrollRecyclerView>(R.id.app_list)
         val progressBarView = view.findViewById<ContentLoadingProgressBar>(R.id.progress_bar)
         val appListAdapter = AppListAdapter()
@@ -95,35 +104,51 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
         refreshTitle()
     }
 
-    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
-        super.onCreateOptionsMenu(menu, inflater)
-        inflater.inflate(R.menu.main, menu)
-        val searchItem = menu.findItem(R.id.search)
-        val searchView = searchItem.actionView as SearchView
-        searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-            override fun onQueryTextChange(newText: String): Boolean {
-                mainViewModel.queryText = newText
-                return true
-            }
+    /**
+     * MenuProvider that inflates the main menu (search / refresh / settings / exit) and handles
+     * item selection. Replaces the deprecated Fragment.onCreateOptionsMenu and
+     * Fragment.onOptionsItemSelected overrides. Registered with the activity's MenuHost in
+     * [on onViewCreated] with the RESUMED lifecycle state, so the menu is only visible and
+     * receives item-selection callbacks while this fragment is the active screen.
+     */
+    private val menuProvider = object : MenuProvider {
+        override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
+            menuInflater.inflate(R.menu.main, menu)
+            val searchItem = menu.findItem(R.id.search)
+            val searchView = searchItem.actionView as SearchView
+            searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+                override fun onQueryTextChange(newText: String): Boolean {
+                    mainViewModel.queryText = newText
+                    return true
+                }
 
-            override fun onQueryTextSubmit(query: String): Boolean {
-                return false
-            }
-        })
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.refresh -> mainViewModel.loadAppList(true)
-            R.id.setting -> MainActivity.gotoFragment(
-                parentFragmentManager,
-                SettingFragment(),
-                SettingFragment.TAG
-            )
-            R.id.exit -> activity?.finishAffinity()
-            else -> return super.onOptionsItemSelected(item)
+                override fun onQueryTextSubmit(query: String): Boolean {
+                    return false
+                }
+            })
         }
-        return true
+
+        override fun onMenuItemSelected(item: MenuItem): Boolean {
+            return when (item.itemId) {
+                R.id.refresh -> {
+                    mainViewModel.loadAppList(true)
+                    true
+                }
+                R.id.setting -> {
+                    MainActivity.gotoFragment(
+                        parentFragmentManager,
+                        SettingFragment(),
+                        SettingFragment.TAG
+                    )
+                    true
+                }
+                R.id.exit -> {
+                    activity?.finishAffinity()
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     override fun onAppListItemClick(appListItem: AppListItem) {

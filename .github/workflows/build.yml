@@ -133,11 +133,14 @@ jobs:
           printf 'ORANGE_KEY_PASSWORD=%s\n'      "$ANDROID_KEY_PASSWORD"      >> "$GITHUB_ENV"
           echo "Keystore decoded to runner temp file (path not printed)."
 
-      - name: Build debug APK
-        run: ./gradlew --warning-mode=all --no-daemon assembleDebug
-
-      - name: Build release APK
-        run: ./gradlew --warning-mode=all --no-daemon assembleRelease
+      - name: Build debug and release APKs concurrently
+        # Combine assembleDebug and assembleRelease into a single Gradle invocation so the
+        # configuration phase runs once (instead of twice), and so Gradle's --parallel mode
+        # (enabled via org.gradle.parallel=true in gradle.properties) can run the per-variant
+        # tasks (debug dexing vs release R8+dexing) concurrently. The two variants share most
+        # of the pipeline (resource merging, Java/Kotlin compilation), which Gradle
+        # de-duplicates automatically when both are requested in the same invocation.
+        run: ./gradlew --warning-mode=all --no-daemon --parallel assembleDebug assembleRelease
 
       - name: Verify both APKs exist and are non-empty
         run: |
