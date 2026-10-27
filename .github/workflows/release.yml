@@ -301,12 +301,12 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             release_tag="${{ github.ref_name }}"
-            title="Lime ${release_tag}"
+            title="${release_tag}"
             echo "Tag push: using tag $release_tag"
           else
             if [ -n "${{ inputs.tag }}" ]; then
               release_tag="${{ inputs.tag }}"
-              title="Lime ${release_tag}"
+              title="${release_tag}"
               echo "workflow_dispatch with custom tag: $release_tag"
             else
               # Default to the latest existing tag reachable from HEAD.
@@ -314,7 +314,7 @@ jobs:
                 echo "ERROR: no tags found in the repository. Provide a tag via the 'tag' input."
                 exit 1
               }
-              title="Lime ${release_tag}"
+              title="${release_tag}"
               echo "workflow_dispatch without tag: defaulting to latest tag $release_tag"
             fi
           fi
