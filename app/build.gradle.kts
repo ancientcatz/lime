@@ -12,9 +12,9 @@ android {
     defaultConfig {
         applicationId = packageName
         minSdk = 30
-        targetSdk = 32
-        versionCode = 4
-        versionName = "1.2.0-npatch"
+        targetSdk = 33
+        versionCode = 5
+        versionName = "1.3.0-npatch"
     }
 
     buildTypes {
@@ -87,16 +87,6 @@ android {
         // its orientation. QUERY_ALL_PACKAGES is the only way to do this on Android 11+.
         disable += "GoogleAppIndexingWarning"
         disable += "Instantiatable"
-        // targetSdk is intentionally preserved at 32 (the original Orange-NG value) per the
-        // migration brief: "Do not increase target SDK or changing runtime behavior without
-        // investigating the consequences." The ExpiredTargetSdkVersion lint check enforces the
-        // Google Play Store's target-API requirement, which is a distribution policy concern, not
-        // a build or runtime incompatibility. The module is distributed via GitHub Releases
-        // (not Google Play), so this check does not apply. Bumping targetSdk to 33+ would change
-        // runtime behavior (notification runtime permissions, granular media permissions,
-        // predictive back gesture, etc.) and is therefore out of scope for this migration.
-        // Documented in docs/npatch-migration-notes/WARNINGS.md.
-        disable += "ExpiredTargetSdkVersion"
     }
 }
 

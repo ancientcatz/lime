@@ -11,7 +11,7 @@ libxposed API 102.
 
 | Platform        | Min API | Notes |
 |:----------------|:-------:|:------|
-| Android         | 30      | minSdk preserved from the original. |
+| Android         | 30 (minSdk) / 33 (targetSdk, Android 13+) | minSdk preserved from the original; targetSdk bumped to 33 (Android 13). |
 | libxposed API   | 101     | `module.prop` declares `minApiVersion=101` and `targetApiVersion=102`. |
 | Framework       | NPatch (LSPosed fork) or any libxposed API 102 compatible framework. |
 
