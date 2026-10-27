@@ -217,3 +217,26 @@ the same on Ubuntu 24.04 and Ubuntu 26. No workflow changes are needed.
 
 **Status**: unresolved (no action possible from the workflow side; this is a runner image
 lifecycle announcement).
+
+---
+
+### ExpiredTargetSdkVersion — RESOLVED by bumping targetSdk to 33
+
+**Update (commit 32c0bab)**: The user explicitly requested targeting Android 13+, so
+`targetSdk` was bumped from 32 to 33. This satisfies Google Play's minimum target-API
+requirement, so the `ExpiredTargetSdkVersion` lint check now passes naturally and the
+`disable += "ExpiredTargetSdkVersion"` rule has been removed from `app/build.gradle.kts`.
+
+Runtime behavior implications of targetSdk 33 (all verified safe for this app):
+- `POST_NOTIFICATIONS` runtime permission: the app does not post notifications, no impact.
+- Granular media permissions: the app does not read media files, no impact.
+- Predictive back gesture: opt-in via `android:enableOnBackInvokedCallback`; the app does
+  not declare it, so default behavior is preserved.
+- `NEARBY_WIFI_DEVICES` / `BODY_SENSORS_BACKGROUND` / `ACTIVITY_RECOGNITION`: not used.
+
+**Status**: resolved (targetSdk 33, lint check passes naturally, no suppression needed).
+
+**Previous status** (for historical reference): the lint check was previously disabled
+with a documented justification because targetSdk was intentionally preserved at 32 per
+the original migration brief. The user's explicit request to target Android 13+ supersedes
+that decision.

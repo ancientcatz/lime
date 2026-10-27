@@ -206,3 +206,43 @@ Authentication is handled by `actions/checkout`'s `persist-credentials: true`
 (the default), which stores the `GITHUB_TOKEN` in the local git config's
 `http.<url>.extraheader` — so the token never appears in the command line, push
 output, or shell history.
+
+## targetSdk change (commit 32c0bab)
+
+Per user request, `targetSdk` was bumped from 32 to 33 (Android 13+). This is the only
+runtime-behavior change in the migration. Implications (all verified safe for this app):
+
+| Android 13 (API 33) change | Impact on Orange-NG |
+|----------------------------|---------------------|
+| `POST_NOTIFICATIONS` runtime permission | None — app does not post notifications. |
+| Granular media permissions | None — app does not read media files. |
+| Predictive back gesture | None — app does not declare `android:enableOnBackInvokedCallback`, so default behavior is preserved. |
+| `NEARBY_WIFI_DEVICES` | None — not used. |
+| `BODY_SENSORS_BACKGROUND` | None — not used. |
+| `ACTIVITY_RECOGNITION` | None — not used. |
+
+The `ExpiredTargetSdkVersion` lint check (previously disabled with justification) now
+passes naturally, so the `disable += "ExpiredTargetSdkVersion"` rule was removed from
+`app/build.gradle.kts`.
+
+`versionCode` was bumped 4 -> 5 and `versionName` 1.2.0-npatch -> 1.3.0-npatch to reflect
+the targetSdk change.
+
+## Pre-fork commit exclusion (commit 32c0bab)
+
+Per user request, pre-fork commits and contributors are now excluded from release notes.
+This is achieved by pushing the `v1.1.0` tag at the fork point (`aefb4a5`, the upstream
+v1.1.0 commit) to the remote. The `ancientcatz/Orange-NG` fork did not previously have
+this tag — only the upstream `Erbzur/Orange` repo had it.
+
+With `v1.1.0` present on the remote:
+- git-cliff's first `ci-*` run (when no previous `ci-*` tag exists) uses `v1.1.0` as the
+  baseline, so only migration commits (by `@ancientcatz`) appear in the changelog.
+- Subsequent runs already used the previous `ci-*` tag as the baseline, so they were
+  already correct.
+- The `v1.1.0` tag is semantically correct: the fork was based on upstream v1.1.0, and
+  the fork point commit is exactly where upstream tagged v1.1.0.
+
+Old draft releases that had incorrect notes (showing upstream commits and `@Erbzur` as a
+contributor) were deleted WITHOUT `--cleanup-tag` so the real git tags survive for
+git-cliff's comparison chain. Only the 2 latest draft releases remain.
