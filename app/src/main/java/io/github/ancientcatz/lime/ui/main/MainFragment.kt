@@ -53,9 +53,14 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
             // set of insertions/deletions/moves to the adapter. Stable IDs (packageName)
             // ensure existing item views are reused rather than rebound when new items
             // trickle in during progressive icon loading.
-            appListAdapter.submitList(it) {
-                appListView.scrollToLastPosition()
-            }
+            //
+            // NOTE: Do NOT call scrollToLastPosition() here. During progressive icon loading
+            // the list updates frequently (every ~120ms), and restoring the scroll position
+            // on each update would fight with the user's active scrolling, causing glitches.
+            // The RecyclerView preserves scroll position across adapter updates automatically
+            // (thanks to stable IDs). The scroll position is restored once, when loading
+            // completes, in the isLoading observer below.
+            appListAdapter.submitList(it)
         }
         mainViewModel.isLoadingLiveData.observe(viewLifecycleOwner) { isLoading ->
             if (isLoading) {
@@ -69,6 +74,10 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
                 // become visible and fill in as fast as icons can load.
                 progressBarView.hide()
                 appListView.isVisible = true
+                // Restore the saved scroll position once, when the list first becomes
+                // visible. This preserves the user's position across activity recreation
+                // without disrupting scrolling during incremental icon loading.
+                appListView.scrollToLastPosition()
             }
         }
     }

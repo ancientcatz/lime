@@ -14,7 +14,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.ancientcatz.lime.R
@@ -28,23 +28,27 @@ import java.text.Collator
  * Implements progressive icon rendering with alphabetical priority:
  *
  *  Phase 1 (enumeration + sorting): on a background thread, enumerate installed apps,
- *  load their labels, filter by the show-system-apps preference, sort alphabetically by
- *  label (locale-aware, case-insensitive, tie-break by packageName for determinism),
- *  and capture the configured orientation. The list is published as soon as Phase 1
- *  completes — initially empty (no icons yet), then icons trickle in during Phase 2.
+ *  load their labels, filter by the show-system-apps preference, sort with configured apps
+ *  first (then alphabetical by label), and capture the configured orientation. The list is
+ *  published as soon as Phase 1 completes — initially empty (no icons yet), then icons
+ *  trickle in during Phase 2.
  *
  *  Phase 2 (icon loading): icons are loaded concurrently on a bounded dispatcher
- *  ([ICON_CONCURRENCY] = 8). Icons are requested in alphabetical order: the pending
- *  list is already sorted, so iterating it in order naturally prioritizes the start of
- *  the alphabet. As each icon finishes, the corresponding item is moved from the
- *  pending list to the ready list at its correct alphabetical position, and the visible
- *  list is republished. Items with a failed icon load are skipped (logged) and never
+ *  ([ICON_CONCURRENCY] = 8). Icons are requested in sort order: the pending queue is
+ *  already sorted, so iterating it in order naturally prioritizes configured apps and the
+ *  start of the alphabet. As each icon finishes, the corresponding item is moved from the
+ *  pending list to the ready list at its correct position, and the visible list is
+ *  republished (throttled). Items with a failed icon load are skipped (logged) and never
  *  appear, so a single failure does not block the rest of the list.
  *
- *  The ready list is always sorted; inserting a newly-ready item uses binary search to
- *  find the correct position, so each incremental update is O(log n) for the insert
- *  plus O(n) for the list copy that LiveData publishes. The adapter's DiffUtil (with
- *  stable packageName identifiers) minimizes view recreation on each update.
+ *  Sort order: configured apps (orientation != UNSPECIFIED) first, then unconfigured apps.
+ *  Within each group, apps are sorted alphabetically by label (locale-aware, case-insensitive
+ *  via [Collator] PRIMARY strength), with packageName as a deterministic tie-break.
+ *
+ *  List updates are throttled ([PUBLISH_THROTTLE_MS] = 120ms) to avoid excessive DiffUtil
+ *  passes during rapid icon loading. This keeps scrolling smooth — without throttling, each
+ *  icon load would trigger a separate submitList + DiffUtil pass, causing jitter when the
+ *  user scrolls during loading.
  *
  *  All expensive work (PackageManager calls, icon decoding, sorting) runs off the main
  *  thread. UI state (the visible list, the loading flag) is published via LiveData
@@ -63,6 +67,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
          * typical devices.
          */
         private const val ICON_CONCURRENCY = 8
+        /**
+         * Minimum delay between list publishes during icon loading. Rapid icon completions
+         * are coalesced into a single publish every [PUBLISH_THROTTLE_MS] ms, reducing the
+         * number of DiffUtil passes and keeping scrolling smooth.
+         */
+        private const val PUBLISH_THROTTLE_MS = 120L
     }
 
     private val sharedConfig = SharedConfig.Provider(app)
@@ -72,25 +82,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
 
     /**
      * The full list of enumerated apps with their labels and orientations, but WITHOUT icons
-     * (icon == null). Sorted alphabetically by [AppListItem.sortKey]. Populated during Phase 1
-     * and used as the source of truth for icon loading and for the current orientation state.
-     * Access is confined to the loading coroutines (off the main thread).
+     * (icon == null). Sorted by [readyListComparator]. Populated during Phase 1 and used as
+     * the source of truth for icon loading and for the current orientation state.
+     * Access is synchronized on [listLock].
      */
     private val appList = mutableListOf<AppListItem>()
 
     /**
-     * Indices into [appList] for items whose icon has NOT yet been loaded. Sorted in the same
-     * alphabetical order as [appList] (so iterating this list loads icons in alphabetical
-     * priority order). Mutated only on the background thread.
+     * Indices into [appList] for items whose icon has NOT yet been loaded. In the same sort
+     * order as [appList] (so iterating this queue loads icons in priority order: configured
+     * apps first, then alphabetical). Mutated only on the background thread.
      */
     private val pendingIconIndices = ArrayDeque<Int>()
 
     /**
-     * The currently visible list: items whose icons have loaded successfully, in alphabetical
-     * order. Published to [appListLiveData] on every incremental update. Confined to the
-     * background thread for mutation; copies are published to LiveData.
+     * The currently visible list: items whose icons have loaded successfully, in sort order
+     * (configured first, then alphabetical). Published to [appListLiveData] on each
+     * incremental update (throttled). Access is synchronized on [listLock].
      */
     private val readyList = mutableListOf<AppListItem>()
+
+    /**
+     * Lock for synchronized access to [appList] and [readyList] from multiple background
+     * coroutines (icon loading + config updates).
+     */
+    private val listLock = Any()
 
     private val appListLiveDataInternal = MutableLiveData<List<AppListItem>>()
     private val isLoadingLiveDataInternal = MutableLiveData<Boolean>()
@@ -110,14 +126,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     private val iconDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(ICON_CONCURRENCY)
 
     /**
-     * Comparator for [readyList]: locale-aware, case-insensitive comparison on [AppListItem.sortKey]
-     * (via [Collator] PRIMARY strength), with [AppListItem.packageName] as a deterministic
-     * tie-break. Used both for the Phase 1 sort and for the binary-search inserts in Phase 2.
+     * Comparator for [readyList] and [appList]: configured apps (orientation != UNSPECIFIED)
+     * first, then alphabetical by label (locale-aware, case-insensitive via [Collator] PRIMARY
+     * strength), with [packageName] as a deterministic tie-break.
      */
     private val collator: Collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
     private val readyListComparator: Comparator<AppListItem> = Comparator { a, b ->
-        val byKey = collator.compare(a.sortKey, b.sortKey)
-        if (byKey != 0) byKey else collator.compare(a.packageName, b.packageName)
+        // Configured apps (orientation != UNSPECIFIED) come first.
+        val aConfigured = a.orientation != Orientation.UNSPECIFIED
+        val bConfigured = b.orientation != Orientation.UNSPECIFIED
+        if (aConfigured != bConfigured) {
+            if (aConfigured) -1 else 1
+        } else {
+            val byKey = collator.compare(a.sortKey, b.sortKey)
+            if (byKey != 0) byKey else collator.compare(a.packageName, b.packageName)
+        }
     }
 
     /**
@@ -128,6 +151,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     @Volatile
     private var currentBenchmark: LoadBenchmark? = null
 
+    /**
+     * Pending throttled publish job. When non-null, a publish is scheduled but not yet
+     * executed. Calling [schedulePublish] cancels any pending publish and schedules a new
+     * one, coalescing rapid updates.
+     */
+    @Volatile
+    private var publishJob: Job? = null
+
     val appListLiveData: LiveData<List<AppListItem>> = appListLiveDataInternal
     val isLoadingLiveData: LiveData<Boolean> = isLoadingLiveDataInternal
 
@@ -135,7 +166,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     var queryText = ""
         set(value) {
             field = value
-            viewModelScope.launch { publishFiltered() }
+            schedulePublish()
         }
 
     init {
@@ -146,6 +177,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         super.onCleared()
         prefs.unregisterOnSharedPreferenceChangeListener(this)
         loadJob?.cancel()
+        publishJob?.cancel()
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
@@ -171,18 +203,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         loadJob = viewModelScope.launch(Dispatchers.Default) {
             try {
                 // ── Phase 1: enumerate + sort ──────────────────────────────────────────
-                appList.clear()
-                readyList.clear()
+                synchronized(listLock) {
+                    appList.clear()
+                    readyList.clear()
+                }
                 pendingIconIndices.clear()
-                publishFiltered()
+                schedulePublish()
 
                 val packageManager = getApplication<Application>().packageManager
-                packageManager.getInstalledApplications(0)
+                val enumerated = packageManager.getInstalledApplications(0)
                     .filter {
                         showSystemApps || (it.flags and ApplicationInfo.FLAG_SYSTEM == 0 &&
                                 it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP == 0)
                     }
-                    .mapTo(appList) { appInfo ->
+                    .map { appInfo ->
                         val configApp = sharedConfig.findConfigApp(appInfo.packageName)
                         AppListItem(
                             packageName = appInfo.packageName,
@@ -198,14 +232,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
                             },
                         )
                     }
-                    .sortWith(readyListComparator)
+                    .sortedWith(readyListComparator)
 
-                // Populate the pending queue in alphabetical order (appList is already sorted).
-                for (i in appList.indices) {
+                synchronized(listLock) {
+                    appList.addAll(enumerated)
+                }
+
+                // Populate the pending queue in sort order (appList is already sorted).
+                for (i in enumerated.indices) {
                     pendingIconIndices.addLast(i)
                 }
 
-                benchmark.onEnumerationDone(appList.size)
+                benchmark.onEnumerationDone(enumerated.size)
 
                 // Phase 1 complete: hide the loading spinner. The list is still empty (no
                 // icons), but the RecyclerView becomes visible so the user sees an empty
@@ -213,7 +251,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
                 isLoadingLiveDataInternal.postValue(false)
                 hasLoadedAppList = true
 
-                // ── Phase 2: load icons concurrently in alphabetical priority order ─────
+                // ── Phase 2: load icons concurrently in priority order ──────────────────
                 loadIcons()
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to load app list", t)
@@ -223,24 +261,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     }
 
     /**
-     * Loads icons for all pending apps. Icons are requested in alphabetical order (the
-     * pending queue preserves [appList]'s sort order). Each icon load runs on [iconDispatcher]
-     * (bounded to [ICON_CONCURRENCY] concurrent loads). When an icon finishes, the item is
-     * moved from the pending queue to [readyList] at its correct alphabetical position and
-     * the visible list is republished.
+     * Loads icons for all pending apps. Icons are requested in sort order (the pending
+     * queue preserves [appList]'s sort order: configured first, then alphabetical). Each
+     * icon load runs on [iconDispatcher] (bounded to [ICON_CONCURRENCY] concurrent loads).
+     * When an icon finishes, the item is moved from the pending queue to [readyList] at its
+     * correct position and the visible list is republished (throttled).
      *
      * Failed icon loads are logged and the item is silently dropped from the ready list —
      * it never appears, but does not block other items.
      */
     private suspend fun loadIcons() {
         val packageManager = getApplication<Application>().packageManager
-        // Launch icon loads in alphabetical order. The bounded dispatcher naturally limits
-        // concurrency; launching them in order means the first ICON_CONCURRENCY items (top
-        // of the alphabet) start loading first.
+        // Launch icon loads in sort order. The bounded dispatcher naturally limits
+        // concurrency; launching them in order means the first ICON_CONCURRENCY items
+        // (configured apps, then top of the alphabet) start loading first.
         val iconJobs = mutableListOf<Job>()
         while (pendingIconIndices.isNotEmpty()) {
             val index = pendingIconIndices.removeFirst()
-            val item = appList[index]
+            val item = synchronized(listLock) { appList[index] }
             iconJobs += viewModelScope.launch(iconDispatcher) {
                 val icon: Drawable? = runCatching {
                     packageManager.getApplicationIcon(item.info)
@@ -255,40 +293,70 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         }
         // Wait for all icon loads to finish so the coroutine doesn't complete early.
         iconJobs.forEach { it.join() }
+        // Final publish (immediate, not throttled) to ensure the complete list is shown.
+        publishNow()
         currentBenchmark?.onAllIconsDone()
     }
 
     /**
      * Called (on the iconDispatcher thread) when an icon finishes loading. Inserts the item
-     * into [readyList] at its correct alphabetical position and republishes the visible list.
+     * into [readyList] at its correct position and schedules a throttled publish.
      *
-     * The insert position is found via binary search on [AppListItem.sortKey] (with
-     * packageName tie-break), so each call is O(log n) for the search plus O(n) for the list
-     * shift. Since [readyList] is confined to the background thread and icon loads are
-     * serialized through the bounded dispatcher, no additional synchronization is needed.
+     * The insert position is found via binary search using [readyListComparator], so each
+     * call is O(log n) for the search plus O(n) for the list shift. [readyList] access is
+     * synchronized on [listLock] because multiple icon-loading coroutines may call this
+     * concurrently.
      */
-    private suspend fun onIconReady(index: Int, icon: Drawable) {
-        val item = appList[index].copy(icon = icon)
-        // Binary search for the insertion point. readyList is sorted by (sortKey, packageName).
-        val insertPos = readyList.binarySearch(item, readyListComparator).let { if (it < 0) -(it + 1) else it }
-        readyList.add(insertPos, item)
-        currentBenchmark?.onIconReady(readyList.size)
-        publishFiltered()
+    private fun onIconReady(index: Int, icon: Drawable) {
+        val readyCount: Int
+        synchronized(listLock) {
+            val item = appList[index].copy(icon = icon)
+            val insertPos = readyList.binarySearch(item, readyListComparator)
+                .let { if (it < 0) -(it + 1) else it }
+            readyList.add(insertPos, item)
+            readyCount = readyList.size
+        }
+        currentBenchmark?.onIconReady(readyCount)
+        schedulePublish()
     }
 
     /**
-     * Publishes the current [readyList] (filtered by [queryText]) to [appListLiveData].
-     * Must be called on a background thread (it reads [readyList] and [queryText] without
-     * synchronization). The LiveData.postValue call is thread-safe and delivers the update
-     * to the main thread.
+     * Schedules a throttled publish of the current [readyList] (filtered by [queryText]) to
+     * [appListLiveData]. Rapid calls are coalesced: if a publish is already pending, it is
+     * cancelled and rescheduled, so at most one publish executes every
+     * [PUBLISH_THROTTLE_MS] ms. This keeps scrolling smooth during rapid icon loading.
      */
-    private suspend fun publishFiltered() = withContext(Dispatchers.Default) {
-        val snapshot = if (queryText.isEmpty()) {
-            readyList.toList()
-        } else {
-            readyList.filter {
-                it.name.contains(queryText, true) ||
-                        it.packageName.contains(queryText, true)
+    private fun schedulePublish() {
+        publishJob?.cancel()
+        publishJob = viewModelScope.launch(Dispatchers.Default) {
+            delay(PUBLISH_THROTTLE_MS)
+            doPublish()
+        }
+    }
+
+    /**
+     * Publishes the current [readyList] immediately, bypassing the throttle. Used for the
+     * final publish after all icons are loaded, and for immediate updates (e.g. orientation
+     * changes) where the user expects instant feedback.
+     */
+    private suspend fun publishNow() = withContext(Dispatchers.Default) {
+        publishJob?.cancel()
+        doPublish()
+    }
+
+    /**
+     * Takes a synchronized snapshot of [readyList] (filtered by [queryText]) and posts it
+     * to [appListLiveData]. Must be called on a background thread.
+     */
+    private fun doPublish() {
+        val q = queryText
+        val snapshot = synchronized(listLock) {
+            if (q.isEmpty()) {
+                readyList.toList()
+            } else {
+                readyList.filter {
+                    it.name.contains(q, true) || it.packageName.contains(q, true)
+                }
             }
         }
         appListLiveDataInternal.postValue(snapshot)
@@ -296,8 +364,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
 
     /**
      * Updates the configured orientation for [packageName] and persists it. Also updates the
-     * matching item in [readyList] (if its icon has loaded) so the change is immediately
-     * visible. Runs on a background thread.
+     * matching item in [appList] (source of truth) and re-inserts it in [readyList] at its
+     * new position (since changing orientation may move it between the configured and
+     * unconfigured groups). The update is published immediately (not throttled) so the user
+     * sees the change instantly.
      */
     fun updateConfigApp(packageName: String, orientation: Int) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -306,21 +376,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
             } else {
                 sharedConfig.removeConfigApp(packageName)
             }
-            // Update the canonical entry in appList (source of truth for orientation).
-            val listIndex = appList.indexOfFirst { it.packageName == packageName }
-            if (listIndex >= 0) {
-                appList[listIndex] = appList[listIndex].copy(
-                    orientation = Orientation.values()[orientation]
-                )
+            val newOrientation = Orientation.values()[orientation]
+            synchronized(listLock) {
+                // Update the canonical entry in appList.
+                val listIndex = appList.indexOfFirst { it.packageName == packageName }
+                if (listIndex >= 0) {
+                    appList[listIndex] = appList[listIndex].copy(orientation = newOrientation)
+                }
+                // Remove and re-insert the visible entry in readyList at its new position
+                // (orientation change may move it between configured/unconfigured groups).
+                val readyIndex = readyList.indexOfFirst { it.packageName == packageName }
+                if (readyIndex >= 0) {
+                    val updated = readyList[readyIndex].copy(orientation = newOrientation)
+                    readyList.removeAt(readyIndex)
+                    val insertPos = readyList.binarySearch(updated, readyListComparator)
+                        .let { if (it < 0) -(it + 1) else it }
+                    readyList.add(insertPos, updated)
+                }
             }
-            // Update the visible entry in readyList if present.
-            val readyIndex = readyList.indexOfFirst { it.packageName == packageName }
-            if (readyIndex >= 0) {
-                readyList[readyIndex] = readyList[readyIndex].copy(
-                    orientation = Orientation.values()[orientation]
-                )
-            }
-            publishFiltered()
+            publishNow()
         }
     }
 
@@ -349,13 +423,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
      */
     private inner class LoadBenchmark {
         private val startNanos = System.nanoTime()
-        private val totalApps: Int get() = appList.size
+        private var totalApps: Int = 0
         private var enumerationDoneMs: Long = -1
         private var firstIconMs: Long = -1
         private var usefulPortionMs: Long = -1
         private var allIconsDoneMs: Long = -1
 
         fun onEnumerationDone(appCount: Int) {
+            totalApps = appCount
             enumerationDoneMs = elapsedMs()
             Log.i(TAG, "benchmark: enumeration done — $appCount apps in ${enumerationDoneMs}ms")
         }
