@@ -141,3 +141,5 @@ topo_order_commits = true
 sort_commits = "oldest"
 # Process submodules commits
 recurse_submodules = false
+
+# Trigger: verify git-cliff compares against the previous ci-* tag
