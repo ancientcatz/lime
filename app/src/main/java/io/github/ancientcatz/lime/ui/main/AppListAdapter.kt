@@ -14,7 +14,16 @@ import io.github.ancientcatz.lime.model.Orientation
 
 class AppListAdapter : ListAdapter<AppListItem, AppListAdapter.ViewHolder>(DiffItemCallback()) {
 
+    init {
+        // Stable IDs (packageName hashCode) so DiffUtil and RecyclerView can track items
+        // across incremental list updates without unnecessary view recreation.
+        setHasStableIds(true)
+    }
+
     var eventListener: EventListener? = null
+
+    override fun getItemId(position: Int): Long =
+        getItem(position).packageName.hashCode().toLong()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context)
@@ -26,6 +35,8 @@ class AppListAdapter : ListAdapter<AppListItem, AppListAdapter.ViewHolder>(DiffI
         getItem(position).let {
             holder.packageName.text = it.packageName
             holder.name.text = it.name
+            // icon is non-null in the published list (the view model only publishes items
+            // whose icon has loaded). The non-null assertion is safe here.
             holder.icon.setImageDrawable(it.icon)
             if (it.orientation != Orientation.UNSPECIFIED) {
                 holder.orientation.text = it.orientation.toLabel()

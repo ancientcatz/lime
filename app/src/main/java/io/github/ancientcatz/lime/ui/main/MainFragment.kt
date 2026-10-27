@@ -24,12 +24,10 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
 
     companion object {
         val TAG = MainFragment::class.simpleName!!
-        private const val MIN_LOADING_DURATION = 1000L
         private const val MIN_ITEM_CLICK_DURATION = 500L
     }
 
     private val mainViewModel by viewModels<MainViewModel>()
-    private var lastLoadStartTime = 0L
     private var lastItemClickTime = 0L
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -51,20 +49,26 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
             itemAnimator = null
         }
         mainViewModel.appListLiveData.observe(viewLifecycleOwner) {
+            // submitList runs DiffUtil on a background thread and dispatches the minimal
+            // set of insertions/deletions/moves to the adapter. Stable IDs (packageName)
+            // ensure existing item views are reused rather than rebound when new items
+            // trickle in during progressive icon loading.
             appListAdapter.submitList(it) {
                 appListView.scrollToLastPosition()
             }
         }
-        mainViewModel.isLoadingLiveData.observe(viewLifecycleOwner) {
-            if (it) {
+        mainViewModel.isLoadingLiveData.observe(viewLifecycleOwner) { isLoading ->
+            if (isLoading) {
+                // Enumeration phase: show the spinner, hide the (empty) list.
                 appListView.isVisible = false
                 progressBarView.show()
-                lastLoadStartTime = System.currentTimeMillis()
             } else {
-                progressBarView.postDelayed({
-                    progressBarView.hide()
-                    progressBarView.postDelayed({ appListView.isVisible = true }, 50)
-                }, MIN_LOADING_DURATION - (System.currentTimeMillis() - lastLoadStartTime))
+                // Enumeration done. Show the list immediately — it may still be empty
+                // (no icons loaded yet) but icons will trickle in progressively via
+                // appListLiveData updates. No artificial delay: the user sees the list
+                // become visible and fill in as fast as icons can load.
+                progressBarView.hide()
+                appListView.isVisible = true
             }
         }
     }
