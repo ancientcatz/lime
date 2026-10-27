@@ -254,3 +254,22 @@ The final successful run (40450657195) corresponds to the actual final implement
 Zero Kotlin warnings remain (the 5 deprecation warnings from run 40449028782 were fixed by
 migrating MainFragment to the MenuProvider API). Build time dropped 33% (2m59s -> 2m0s)
 thanks to the concurrent debug+release build + Gradle parallel mode.
+
+---
+
+## Run 40452941884 (trigger for next-run comparison test)
+
+- **Commit**: `0890d730063a27bf3158ad155c968dfe1d9f6d6c` (`0890d73`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T05:01:30Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40452941884
+
+### What this run verified
+- The `Push tag to remote` step successfully pushed `ci-0890d730063a` as a real git ref.
+- Confirmed via `gh api repos/ancientcatz/Orange-NG/tags` that the tag now exists on the remote.
+- This is the first run that pushes a real tag, so the changelog still shows all commits
+  (no previous tag to compare against). The NEXT run should show only the new commit plus
+  the "Full Changelog: ci-0890d730063a...ci-<new>" compare link.
+
