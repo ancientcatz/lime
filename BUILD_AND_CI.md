@@ -246,3 +246,35 @@ With `v1.1.0` present on the remote:
 Old draft releases that had incorrect notes (showing upstream commits and `@Erbzur` as a
 contributor) were deleted WITHOUT `--cleanup-tag` so the real git tags survive for
 git-cliff's comparison chain. Only the 2 latest draft releases remain.
+
+## Trigger policy change (commit d254cb2)
+
+Per user request, the release trigger policy changed:
+
+| Trigger | Build job | Release job | Draft release created? |
+|---------|-----------|-------------|------------------------|
+| `push` to `feat/npatch-libxposed-102` | ✓ (full build/lint/test/sign + artifact upload) | ✗ (skipped) | No |
+| `workflow_dispatch` (no tag input) | ✓ | ✓ | Yes, tagged `ci-<short-sha>` |
+| `workflow_dispatch` (with `tag` input, e.g. `v1.3.0`) | ✓ | ✓ | Yes, tagged with the input value |
+| `pull_request` | ✓ (build/lint/test only, no signing) | ✗ (skipped) | No |
+
+### `tag` input
+
+`workflow_dispatch` accepts an optional `tag` string input:
+- **Empty** (default): the release is tagged `ci-<short-sha>` — an ad-hoc testable build off
+  the latest commit. Title: "Orange-NG CI Build `<short-sha>`". Disclaimer: "This is an
+  automated CI build from the branch. It is not a stable release."
+- **Custom** (e.g. `v1.3.0`): the release is tagged with the provided value — a versioned
+  release. Title: "Orange-NG `v1.3.0`". Disclaimer: "This is a draft release prepared by CI
+  from the branch. Review the changelog and assets, then publish the release when ready."
+
+The `tag` input lets the user cut a real versioned release (e.g. `v1.3.0`) by dispatching
+the workflow with that tag, or cut an ad-hoc CI build by dispatching without a tag.
+
+### Concurrency
+
+The concurrency group now includes `github.event_name`:
+`build-${{ github.event_name }}-${{ github.ref }}`. This ensures a push does NOT cancel an
+in-flight `workflow_dispatch` release (and vice versa) — they run independently. Multiple
+pushes in quick succession still cancel each other (good — saves runner minutes), and
+multiple dispatches in quick succession cancel each other too.
