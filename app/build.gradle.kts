@@ -30,10 +30,12 @@ android {
             // Release signing is driven by environment variables so that CI can sign with a
             // temporary keystore stored in GitHub Actions secrets, and local builds without
             // those env vars produce an unsigned release APK (still useful for local validation).
-            val keystoreFilePath = providers.environmentVariable("ORANGE_KEYSTORE_FILE").orNull
-            val keystorePwd = providers.environmentVariable("ORANGE_KEYSTORE_PASSWORD").orNull
-            val keyAliasName = providers.environmentVariable("ORANGE_KEY_ALIAS").orNull
-            val keyPwd = providers.environmentVariable("ORANGE_KEY_PASSWORD").orNull
+            // We treat both null AND empty-string as "not set" so a workflow that exposes the
+            // secret name but not its value (e.g. a pull_request run) falls back to unsigned.
+            val keystoreFilePath = providers.environmentVariable("ORANGE_KEYSTORE_FILE").orNull?.takeIf { it.isNotBlank() }
+            val keystorePwd = providers.environmentVariable("ORANGE_KEYSTORE_PASSWORD").orNull?.takeIf { it.isNotEmpty() }
+            val keyAliasName = providers.environmentVariable("ORANGE_KEY_ALIAS").orNull?.takeIf { it.isNotEmpty() }
+            val keyPwd = providers.environmentVariable("ORANGE_KEY_PASSWORD").orNull?.takeIf { it.isNotEmpty() }
             if (keystoreFilePath != null && keystorePwd != null && keyAliasName != null && keyPwd != null) {
                 signingConfig = signingConfigs.create("release") {
                     storeFile = file(keystoreFilePath)

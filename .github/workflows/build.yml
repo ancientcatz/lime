@@ -46,13 +46,17 @@ jobs:
     name: Build, lint, test, sign
     runs-on: ubuntu-latest
     env:
-      # Forwarded to Gradle so signingConfig is created only when all four values are present.
-      # For pull_request runs these env vars are empty (secrets are not available to PR code),
-      # so the release APK is built unsigned — exactly what we want for PR validation.
-      ORANGE_KEYSTORE_FILE: ${{ secrets.ORANGE_KEYSTORE_FILE }}
-      ORANGE_KEYSTORE_PASSWORD: ${{ secrets.ORANGE_KEYSTORE_PASSWORD }}
-      ORANGE_KEY_ALIAS: ${{ secrets.ORANGE_KEY_ALIAS }}
-      ORANGE_KEY_PASSWORD: ${{ secrets.ORANGE_KEY_PASSWORD }}
+      # The four signing secrets are stored under ANDROID_* names. We expose them to the workflow
+      # via these env vars so the decode step can find them. The Gradle build reads
+      # ORANGE_KEYSTORE_FILE (a PATH, set after decoding), ORANGE_KEYSTORE_PASSWORD,
+      # ORANGE_KEY_ALIAS, and ORANGE_KEY_PASSWORD — all four are intentionally left empty here
+      # so the decode step (which runs only on push/workflow_dispatch) can decide whether to
+      # populate them. For pull_request runs these stay empty and the release APK is built
+      # unsigned, which is what we want for PR validation.
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@v4
@@ -112,15 +116,21 @@ jobs:
         run: ./gradlew --warning-mode=all --no-daemon testDebugUnitTest
 
       - name: Decode release keystore (only when secrets are available)
-        if: ${{ env.ORANGE_KEYSTORE_FILE != '' && github.event_name != 'pull_request' }}
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && github.event_name != 'pull_request' }}
         id: keystore
         run: |
           # Decode the Base64-encoded keystore from the secret into a temporary runner file.
           # The file lives only on the runner and is wiped in the post step below.
           keystore_path="$RUNNER_TEMP/orange-release.jks"
-          printf '%s' "$ORANGE_KEYSTORE_FILE" | base64 -d > "$keystore_path"
-          # Override the env var to point at the decoded file path (Gradle reads a path, not raw bytes).
-          echo "ORANGE_KEYSTORE_FILE=$keystore_path" >> "$GITHUB_ENV"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore_path"
+          # Expose the four ORANGE_* env vars that Gradle reads. The keystore FILE is the path
+          # to the decoded file; the other three are passed through verbatim from the ANDROID_*
+          # secrets. The passwords are piped via stdin to printf so they never appear in the
+          # process list — printf is a shell builtin so there is no /proc/<pid>/cmdline leak.
+          echo "ORANGE_KEYSTORE_FILE=$keystore_path"      >> "$GITHUB_ENV"
+          printf 'ORANGE_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          printf 'ORANGE_KEY_ALIAS=%s\n'         "$ANDROID_KEY_ALIAS"         >> "$GITHUB_ENV"
+          printf 'ORANGE_KEY_PASSWORD=%s\n'      "$ANDROID_KEY_PASSWORD"      >> "$GITHUB_ENV"
           echo "Keystore decoded to runner temp file (path not printed)."
 
       - name: Build debug APK
@@ -140,7 +150,7 @@ jobs:
           echo "Release APK: $release_apk ($(stat -c%s "$release_apk") bytes)"
 
       - name: Verify release APK signature (only when signed)
-        if: ${{ env.ORANGE_KEYSTORE_FILE != '' && github.event_name != 'pull_request' }}
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && github.event_name != 'pull_request' }}
         run: |
           release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           # apksigner exits non-zero if the APK is not signed or the signature is invalid.
