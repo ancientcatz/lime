@@ -65,12 +65,25 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platforms;android-37
-            build-tools;37.0.0
+      - name: Set up Android SDK components (sdkmanager directly)
+        # The ubuntu-latest runner ships with Android SDK cmdline-tools pre-installed at
+        # /usr/local/lib/android/sdk. We install the specific platform and build-tools we need
+        # via sdkmanager directly. This avoids the android-actions/setup-android action, which
+        # mishandles multi-line `packages` inputs (it joins them with newlines and passes the
+        # result as a single package name, causing "Failed to find package" errors).
+        run: |
+          set -e
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          # Accept licenses non-interactively so sdkmanager does not prompt.
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          # Install each package separately so sdkmanager sees them as distinct arguments.
+          sdkmanager "platforms;android-37" "build-tools;37.0.0" "platform-tools"
+          # Verify the components are actually installed.
+          test -d "$ANDROID_HOME/platforms/android-37" || { echo "platforms;android-37 missing"; exit 1; }
+          test -d "$ANDROID_HOME/build-tools/37.0.0" || { echo "build-tools;37.0.0 missing"; exit 1; }
+          echo "Android SDK components installed."
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -126,7 +139,7 @@ jobs:
         run: |
           release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           # apksigner exits non-zero if the APK is not signed or the signature is invalid.
-          $ANDROID_HOME/build-tools/37.0.0/apksigner verify --verbose "$release_apk"
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$release_apk"
 
       - name: Stage APKs with predictable names
         run: |
