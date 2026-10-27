@@ -198,7 +198,7 @@ jobs:
     permissions:
       contents: write  # needed to create draft releases and tags
     steps:
-      - name: Checkout (full history for git-cliff)
+      - name: Checkout (full history + tags for git-cliff)
         uses: actions/checkout@v6
         with:
           # fetch-depth: 0 is required by orhun/git-cliff-action so git-cliff can
@@ -206,6 +206,13 @@ jobs:
           # against. With the default fetch-depth: 1, git-cliff would only see
           # the single HEAD commit and emit an empty or single-commit changelog.
           fetch-depth: 0
+          # fetch-tags: true is required so the upstream v* tags (v1.0.0, v1.0.1,
+          # v1.1.0) and any previous ci-* tags are present in the local checkout.
+          # Without this, actions/checkout passes --no-tags to git fetch, which
+          # prevents git-cliff from finding the previous tag and causes it to
+          # emit all commits from the beginning of history instead of just the
+          # commits since the previous release.
+          fetch-tags: true
 
       - name: Download APK artifacts
         uses: actions/download-artifact@v8
