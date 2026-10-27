@@ -11,11 +11,14 @@ import androidx.core.view.isVisible
 import androidx.core.widget.ContentLoadingProgressBar
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import io.github.libxposed.service.XposedService
+import lsposed.orange.App
 import lsposed.orange.R
 import lsposed.orange.ui.MainActivity
 import lsposed.orange.ui.setting.SettingFragment
 
-class MainFragment : Fragment(R.layout.fragment_main), AppListAdapter.EventListener {
+class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
+    AppListAdapter.EventListener {
 
     companion object {
         val TAG = MainFragment::class.simpleName!!
@@ -59,12 +62,37 @@ class MainFragment : Fragment(R.layout.fragment_main), AppListAdapter.EventListe
 
     override fun onStart() {
         super.onStart()
+        App.addServiceStateListener(this, notifyImmediately = true)
+        refreshTitle()
+        mainViewModel.loadAppList()
+    }
+
+    override fun onStop() {
+        App.removeServiceStateListener(this)
+        super.onStop()
+    }
+
+    /**
+     * Modern module-active detection: the framework delivers an [XposedService] binder to the
+     * module's settings process when the module is enabled in NPatch (or LSPosed). If the binder
+     * is held, the module is active. This replaces the legacy Java-level hook on
+     * `MainFragment.isModuleActive` which never actually ran in production because the modern
+     * module is never injected into its own settings process (scope is `com.seleuco.mame4droid`
+     * only).
+     */
+    private fun isModuleActive(): Boolean = App.mService != null
+
+    private fun refreshTitle() {
         activity?.let {
             it.title = "${getString(R.string.app_name)}${
                 if (!isModuleActive()) " (${getString(R.string.label_module_not_active)})" else ""
             }"
         }
-        mainViewModel.loadAppList()
+    }
+
+    override fun onServiceStateChanged(service: XposedService?) {
+        // Refresh the title (which depends on App.mService) whenever the service state changes.
+        refreshTitle()
     }
 
     override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
@@ -113,6 +141,4 @@ class MainFragment : Fragment(R.layout.fragment_main), AppListAdapter.EventListe
             lastItemClickTime = currentTime
         }
     }
-
-    private fun isModuleActive() = false
 }

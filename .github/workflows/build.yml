@@ -1,0 +1,248 @@
+name: Build, sign, and publish Orange-NG
+
+# This workflow builds, lints, tests, signs, and publishes both debug and release APKs for
+# every implementation commit on feat/npatch-libxposed-102. Both APKs are attached to a draft
+# GitHub Release tagged ci-<short-sha> so each commit has its own testable artifacts.
+#
+# Pull-request runs use the same build/lint/test pipeline but skip signing and the release job,
+# so untrusted PR code never sees signing secrets.
+#
+# Security notes:
+#  - The personal access token is NEVER embedded in this workflow. We use the automatically
+#    provided GITHUB_TOKEN for all GitHub operations (creating releases, uploading assets).
+#  - Signing secrets are only referenced inside the build job, and only conditionally — for
+#    pull_request events the workflow skips the signing step entirely.
+#  - The release job runs with contents:write permission. The build job uses only the default
+#    permissions.
+#  - Third-party actions are pinned to specific major versions.
+
+on:
+  push:
+    branches:
+      - feat/npatch-libxposed-102
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/**/*.md'
+  pull_request:
+    branches:
+      - feat/npatch-libxposed-102
+  workflow_dispatch:
+
+# Cancel any in-flight run for the same ref when a new commit lands. This avoids wasted runner
+# minutes when several commits are pushed in quick succession, but does NOT cancel the run that
+# actually produces the draft release for a given commit (because the latest commit's run is the
+# one that survives).
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege defaults. The release job escalates to contents:write at the job level.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, lint, test, sign
+    runs-on: ubuntu-latest
+    env:
+      # Forwarded to Gradle so signingConfig is created only when all four values are present.
+      # For pull_request runs these env vars are empty (secrets are not available to PR code),
+      # so the release APK is built unsigned — exactly what we want for PR validation.
+      ORANGE_KEYSTORE_FILE: ${{ secrets.ORANGE_KEYSTORE_FILE }}
+      ORANGE_KEYSTORE_PASSWORD: ${{ secrets.ORANGE_KEYSTORE_PASSWORD }}
+      ORANGE_KEY_ALIAS: ${{ secrets.ORANGE_KEY_ALIAS }}
+      ORANGE_KEY_PASSWORD: ${{ secrets.ORANGE_KEY_PASSWORD }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-37
+            build-tools;37.0.0
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Validate Gradle configuration
+        run: ./gradlew --version
+
+      - name: Clean
+        run: ./gradlew --warning-mode=all --no-daemon clean
+
+      - name: Lint (debug)
+        run: ./gradlew --warning-mode=all --no-daemon lintDebug
+
+      - name: Unit tests (debug)
+        run: ./gradlew --warning-mode=all --no-daemon testDebugUnitTest
+
+      - name: Decode release keystore (only when secrets are available)
+        if: ${{ env.ORANGE_KEYSTORE_FILE != '' && github.event_name != 'pull_request' }}
+        id: keystore
+        run: |
+          # Decode the Base64-encoded keystore from the secret into a temporary runner file.
+          # The file lives only on the runner and is wiped in the post step below.
+          keystore_path="$RUNNER_TEMP/orange-release.jks"
+          printf '%s' "$ORANGE_KEYSTORE_FILE" | base64 -d > "$keystore_path"
+          # Override the env var to point at the decoded file path (Gradle reads a path, not raw bytes).
+          echo "ORANGE_KEYSTORE_FILE=$keystore_path" >> "$GITHUB_ENV"
+          echo "Keystore decoded to runner temp file (path not printed)."
+
+      - name: Build debug APK
+        run: ./gradlew --warning-mode=all --no-daemon assembleDebug
+
+      - name: Build release APK
+        run: ./gradlew --warning-mode=all --no-daemon assembleRelease
+
+      - name: Verify both APKs exist and are non-empty
+        run: |
+          set -e
+          debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          test -s "$debug_apk" || { echo "Debug APK missing or empty: $debug_apk"; exit 1; }
+          test -s "$release_apk" || { echo "Release APK missing or empty: $release_apk"; exit 1; }
+          echo "Debug APK:   $debug_apk ($(stat -c%s "$debug_apk") bytes)"
+          echo "Release APK: $release_apk ($(stat -c%s "$release_apk") bytes)"
+
+      - name: Verify release APK signature (only when signed)
+        if: ${{ env.ORANGE_KEYSTORE_FILE != '' && github.event_name != 'pull_request' }}
+        run: |
+          release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          # apksigner exits non-zero if the APK is not signed or the signature is invalid.
+          $ANDROID_HOME/build-tools/37.0.0/apksigner verify --verbose "$release_apk"
+
+      - name: Stage APKs with predictable names
+        run: |
+          # Copy both APKs to a staging directory with predictable names so the upload-artifact
+          # step and the release job can reference them without globbing.
+          staging="$RUNNER_TEMP/apks"
+          mkdir -p "$staging"
+          debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          cp "$debug_apk" "$staging/orange-ng-v${{ github.sha }}-debug.apk"
+          # If the release APK is signed it's named app-release.apk; if unsigned it's
+          # app-release-unsigned.apk. Normalize to a single name.
+          cp "$release_apk" "$staging/orange-ng-v${{ github.sha }}-release.apk"
+          echo "Staged APKs:"
+          ls -la "$staging"
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks-${{ github.sha }}
+          path: ${{ runner.temp }}/apks/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Cleanup keystore (always, even on failure)
+        if: always() && steps.keystore.outcome == 'success'
+        run: |
+          if [ -f "$RUNNER_TEMP/orange-release.jks" ]; then
+            shred -u "$RUNNER_TEMP/orange-release.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/orange-release.jks"
+          fi
+          echo "Temporary keystore removed."
+
+  release:
+    name: Create or update draft release
+    needs: build
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed to create draft releases and tags
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: apks-${{ github.sha }}
+          path: ${{ runner.temp }}/apks
+
+      - name: Compute CI tag and release title
+        id: meta
+        run: |
+          short_sha=${GITHUB_SHA::12}
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "ci_tag=ci-$short_sha" >> "$GITHUB_OUTPUT"
+          echo "title=Orange-NG CI Build $short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Build release notes
+        id: notes
+        run: |
+          branch=${GITHUB_REF#refs/heads/}
+          build_date=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          {
+            echo "## Orange-NG CI Build"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Branch | \`$branch\` |"
+            echo "| Commit | [\`$GITHUB_SHA\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA) |"
+            echo "| Built | $build_date |"
+            echo "| Run | [$GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) |"
+            echo ""
+            echo "### Artifacts"
+            echo ""
+            echo "- \`orange-ng-v$GITHUB_SHA-debug.apk\` — debug build, signed with the Android debug key."
+            echo "- \`orange-ng-v$GITHUB_SHA-release.apk\` — release build, signed with the temporary CI keystore (will be replaced with a permanent signing identity before any stable release)."
+            echo ""
+            echo "### Install"
+            echo ""
+            echo "1. Make sure NPatch (or another libxposed API 102 compatible framework) is installed and enabled."
+            echo "2. Install the release APK (or the debug APK for development)."
+            echo "3. Enable the Orange-NG module in NPatch and confirm the scope includes \`com.seleuco.mame4droid\`."
+            echo "4. Force-stop or reboot the target app, then verify the configured orientation is applied."
+            echo ""
+            echo "> This is an automated CI build from the \`feat/npatch-libxposed-102\` branch. It is not a stable release. The signing identity is temporary and may be replaced later (which would require uninstalling any previously installed CI build before upgrading)."
+          } > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Delete existing draft release for this commit (if any, so a rerun doesn't leave stale assets)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          if gh release view "${{ steps.meta.outputs.ci_tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Existing release found for tag ${{ steps.meta.outputs.ci_tag }}; deleting and recreating to ensure asset freshness."
+            gh release delete "${{ steps.meta.outputs.ci_tag }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          else
+            echo "No existing release for tag ${{ steps.meta.outputs.ci_tag }}; creating fresh."
+          fi
+
+      - name: Create draft release with both APKs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.meta.outputs.ci_tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target feat/npatch-libxposed-102 \
+            --title "${{ steps.meta.outputs.title }}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --draft \
+            "$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-debug.apk" \
+            "$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-release.apk"
+
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ steps.meta.outputs.ci_tag }}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name) (\(.size) bytes)"'

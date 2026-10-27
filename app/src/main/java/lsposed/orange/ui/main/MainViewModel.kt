@@ -45,9 +45,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         prefs.unregisterOnSharedPreferenceChangeListener(this)
     }
 
-    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String) {
-        sharedConfig.savePref(key)
-        if (key == keyshowSystemApps) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
+        val k = key ?: return
+        sharedConfig.savePref(k)
+        if (k == keyshowSystemApps) {
             hasLoadedAppList = false
         }
     }

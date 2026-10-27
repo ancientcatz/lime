@@ -6,19 +6,27 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!--
+        Note: the legacy Xposed metadata (xposedmodule, xposedminversion, xposeddescription,
+        xposedscope) and the legacy de.robv.android.xposed.category.MODULE_SETTINGS category
+        have been removed. The modern libxposed API 102 discovers the module via the
+        META-INF/xposed/{java_init.list, module.prop, scope.list} resources packaged inside the
+        APK. NPatch (an LSPosed fork) auto-detects the launcher activity for module settings, so
+        the legacy category is no longer needed.
+
+        The launcher entry point is the .Launcher activity-alias (which targets .ui.MainActivity).
+        The SettingFragment toggles this alias's component enabled state to implement the
+        "Hide Launcher Icon" preference, so .ui.MainActivity itself must NOT declare a LAUNCHER
+        intent-filter (otherwise the hide feature would not actually hide the icon).
+    -->
     <application
+        android:name=".App"
         android:label="@string/app_name"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
 
         <activity
             android:name=".ui.MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
-            </intent-filter>
-        </activity>
+            android:exported="true" />
 
         <activity-alias
             android:name=".Launcher"
@@ -26,22 +34,8 @@
             android:targetActivity=".ui.MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
-
-        <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="93" />
-        <meta-data
-            android:name="xposeddescription"
-            android:value="@string/module_description" />
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/module_scope" />
     </application>
 </manifest>
