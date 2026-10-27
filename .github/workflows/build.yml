@@ -395,15 +395,39 @@ jobs:
           echo "--- Full changelog (this becomes the release notes) ---"
           cat "$changelog"
 
+      - name: Rename APKs to version-based filenames
+        # Rename the downloaded APKs from the internal sha-based names to the
+        # user-facing version-based names. The version is derived from the
+        # release tag (inputs.tag if provided, else ci-<short-sha>):
+        #   release APK: lime-<version>.apk        (e.g. lime-v1.4.0.apk)
+        #   debug APK:   lime-debug-<version>.apk  (e.g. lime-debug-v1.4.0.apk)
+        # For a CI build (no tag input), <version> is ci-<short-sha>, so the
+        # filenames are lime-ci-<sha>.apk and lime-debug-ci-<sha>.apk.
+        run: |
+          set -e
+          version="${{ steps.meta.outputs.release_tag }}"
+          release_src="$RUNNER_TEMP/apks/lime-v${{ github.sha }}-release.apk"
+          release_dst="$RUNNER_TEMP/apks/lime-${version}.apk"
+          mv "$release_src" "$release_dst"
+          echo "Renamed release APK: $release_dst"
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            debug_src="$RUNNER_TEMP/apks/lime-v${{ github.sha }}-debug.apk"
+            debug_dst="$RUNNER_TEMP/apks/lime-debug-${version}.apk"
+            mv "$debug_src" "$debug_dst"
+            echo "Renamed debug APK: $debug_dst"
+          fi
+          ls -la "$RUNNER_TEMP/apks/"
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Build the asset list: always include the release APK; include the
           # debug APK only when the debug input is true.
-          assets=("$RUNNER_TEMP/apks/lime-v${{ github.sha }}-release.apk")
+          version="${{ steps.meta.outputs.release_tag }}"
+          assets=("$RUNNER_TEMP/apks/lime-${version}.apk")
           if [ "${{ inputs.debug }}" = "true" ]; then
-            assets+=("$RUNNER_TEMP/apks/lime-v${{ github.sha }}-debug.apk")
+            assets+=("$RUNNER_TEMP/apks/lime-debug-${version}.apk")
           fi
           echo "Assets to attach: ${assets[@]}"
           # The release notes are the raw git-cliff output — no wrapping.
