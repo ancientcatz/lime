@@ -71,16 +71,21 @@ jobs:
         # via sdkmanager directly. This avoids the android-actions/setup-android action, which
         # mishandles multi-line `packages` inputs (it joins them with newlines and passes the
         # result as a single package name, causing "Failed to find package" errors).
+        #
+        # Note: the platform package name is `platforms;android-37.0` (with the .0 suffix), not
+        # `platforms;android-37`. The sdkmanager repository lists 37.0, 37.1, and 37.2 as
+        # distinct packages; the unsuffixed `android-37` alias is not published.
         run: |
           set -e
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           # Accept licenses non-interactively so sdkmanager does not prompt.
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          # Install each package separately so sdkmanager sees them as distinct arguments.
-          sdkmanager "platforms;android-37" "build-tools;37.0.0" "platform-tools"
+          # Install the three packages we need. Pass them as separate arguments so sdkmanager
+          # sees each one distinctly.
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
           # Verify the components are actually installed.
-          test -d "$ANDROID_HOME/platforms/android-37" || { echo "platforms;android-37 missing"; exit 1; }
+          test -d "$ANDROID_HOME/platforms/android-37.0" || { echo "platforms;android-37.0 missing"; exit 1; }
           test -d "$ANDROID_HOME/build-tools/37.0.0" || { echo "build-tools;37.0.0 missing"; exit 1; }
           echo "Android SDK components installed."
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
