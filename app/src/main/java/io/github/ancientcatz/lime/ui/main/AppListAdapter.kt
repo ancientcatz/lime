@@ -1,4 +1,4 @@
-package lsposed.orange.ui.main
+package io.github.ancientcatz.lime.ui.main
 
 import android.view.LayoutInflater
 import android.view.View
@@ -9,8 +9,8 @@ import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import lsposed.orange.R
-import lsposed.orange.model.Orientation
+import io.github.ancientcatz.lime.R
+import io.github.ancientcatz.lime.model.Orientation
 
 class AppListAdapter : ListAdapter<AppListItem, AppListAdapter.ViewHolder>(DiffItemCallback()) {
 

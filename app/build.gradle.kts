@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    val packageName = "lsposed.orange"
+    val packageName = "io.github.ancientcatz.lime"
     namespace = packageName
     compileSdk = 37
     buildToolsVersion = "37.0.0"
@@ -13,8 +13,8 @@ android {
         applicationId = packageName
         minSdk = 30
         targetSdk = 33
-        versionCode = 5
-        versionName = "1.3.0-npatch"
+        versionCode = 6
+        versionName = "1.4.0"
     }
 
     buildTypes {
@@ -32,10 +32,10 @@ android {
             // those env vars produce an unsigned release APK (still useful for local validation).
             // We treat both null AND empty-string as "not set" so a workflow that exposes the
             // secret name but not its value (e.g. a pull_request run) falls back to unsigned.
-            val keystoreFilePath = providers.environmentVariable("ORANGE_KEYSTORE_FILE").orNull?.takeIf { it.isNotBlank() }
-            val keystorePwd = providers.environmentVariable("ORANGE_KEYSTORE_PASSWORD").orNull?.takeIf { it.isNotEmpty() }
-            val keyAliasName = providers.environmentVariable("ORANGE_KEY_ALIAS").orNull?.takeIf { it.isNotEmpty() }
-            val keyPwd = providers.environmentVariable("ORANGE_KEY_PASSWORD").orNull?.takeIf { it.isNotEmpty() }
+            val keystoreFilePath = providers.environmentVariable("LIME_KEYSTORE_FILE").orNull?.takeIf { it.isNotBlank() }
+            val keystorePwd = providers.environmentVariable("LIME_KEYSTORE_PASSWORD").orNull?.takeIf { it.isNotEmpty() }
+            val keyAliasName = providers.environmentVariable("LIME_KEY_ALIAS").orNull?.takeIf { it.isNotEmpty() }
+            val keyPwd = providers.environmentVariable("LIME_KEY_PASSWORD").orNull?.takeIf { it.isNotEmpty() }
             if (keystoreFilePath != null && keystorePwd != null && keyAliasName != null && keyPwd != null) {
                 signingConfig = signingConfigs.create("release") {
                     storeFile = file(keystoreFilePath)
@@ -52,7 +52,7 @@ android {
 
     buildFeatures {
         viewBinding = false
-        // BuildConfig is used by OrangeModule (BuildConfig.APPLICATION_ID) and SettingFragment
+        // BuildConfig is used by LimeModule (BuildConfig.APPLICATION_ID) and SettingFragment
         // (BuildConfig.VERSION_NAME). AGP 9.x defaults buildConfig to false, so we opt in.
         buildConfig = true
     }
@@ -83,7 +83,7 @@ android {
     lint {
         abortOnError = true
         checkReleaseBuilds = false
-        // Orange-NG needs to enumerate all installed apps so the user can pick one and configure
+        // Lime needs to enumerate all installed apps so the user can pick one and configure
         // its orientation. QUERY_ALL_PACKAGES is the only way to do this on Android 11+.
         disable += "GoogleAppIndexingWarning"
         disable += "Instantiatable"

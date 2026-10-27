@@ -1,12 +1,12 @@
-package lsposed.orange.ui
+package io.github.ancientcatz.lime.ui
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.FragmentTransaction
-import lsposed.orange.R
-import lsposed.orange.ui.main.MainFragment
+import io.github.ancientcatz.lime.R
+import io.github.ancientcatz.lime.ui.main.MainFragment
 
 class MainActivity : AppCompatActivity() {
 

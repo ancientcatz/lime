@@ -1,4 +1,4 @@
-package lsposed.orange.ui.main
+package io.github.ancientcatz.lime.ui.main
 
 import android.os.Bundle
 import android.view.Menu
@@ -14,10 +14,10 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import io.github.libxposed.service.XposedService
-import lsposed.orange.App
-import lsposed.orange.R
-import lsposed.orange.ui.MainActivity
-import lsposed.orange.ui.setting.SettingFragment
+import io.github.ancientcatz.lime.App
+import io.github.ancientcatz.lime.R
+import io.github.ancientcatz.lime.ui.MainActivity
+import io.github.ancientcatz.lime.ui.setting.SettingFragment
 
 class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
     AppListAdapter.EventListener {

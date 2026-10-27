@@ -1,16 +1,16 @@
-package lsposed.orange.hook
+package io.github.ancientcatz.lime.hook
 
 import android.app.Activity
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
-import lsposed.orange.BuildConfig
-import lsposed.orange.SharedConfig
-import lsposed.orange.model.mapActivityOrientation
+import io.github.ancientcatz.lime.BuildConfig
+import io.github.ancientcatz.lime.SharedConfig
+import io.github.ancientcatz.lime.model.mapActivityOrientation
 
 /**
- * Modern libxposed API 102 entry point for Orange-NG.
+ * Modern libxposed API 102 entry point for Lime.
  *
  * Replaces the legacy [de.robv.android.xposed.IXposedHookZygoteInit] +
  * [de.robv.android.xposed.IXposedHookLoadPackage] implementation. The framework instantiates this
@@ -19,7 +19,7 @@ import lsposed.orange.model.mapActivityOrientation
  * lifecycle callbacks ([onModuleLoaded], [onPackageLoaded], ...) fire.
  *
  * Behavior preserved from the legacy implementation:
- *  - The module's own settings application (`lsposed.orange`) is never hooked.
+ *  - The module's own settings application (`io.github.ancientcatz.lime`) is never hooked.
  *  - The hook fires on `Activity.attach` (after the original method returns) so the Activity is
  *    fully constructed when we mutate `requestedOrientation`.
  *  - If no configuration exists for the current package, the hook does nothing (the app's own
@@ -30,16 +30,16 @@ import lsposed.orange.model.mapActivityOrientation
  *  - The legacy `MainFragment.isModuleActive` Java-level hook is removed. In the modern API the
  *    module is never injected into its own settings process (the scope is `com.seleuco.mame4droid`
  *    only), so that hook never actually ran in production. The modern equivalent — checking
- *    `App.mService != null` — is implemented in [lsposed.orange.ui.main.MainFragment].
+ *    `App.mService != null` — is implemented in [io.github.ancientcatz.lime.ui.main.MainFragment].
  *  - Settings IPC uses [XposedInterface.getRemotePreferences] (read-only in hooked processes)
  *    instead of the legacy `XSharedPreferences` + `MODE_WORLD_READABLE` SharedPreferences, which
  *    has been broken since Android N (targetSdk >= 24).
  */
-class OrangeModule : XposedModule() {
+class LimeModule : XposedModule() {
 
     companion object {
-        private const val TAG = "Orange"
-        private const val REMOTE_PREFS_NAME = "orange_config"
+        private const val TAG = "Lime"
+        private const val REMOTE_PREFS_NAME = "lime_config"
     }
 
     /**

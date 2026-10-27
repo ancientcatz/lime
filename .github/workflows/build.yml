@@ -1,4 +1,4 @@
-name: Build, sign, and publish Orange-NG
+name: Build, sign, and publish Lime
 
 # This workflow builds, lints, tests, and signs both debug and release APKs for every
 # implementation commit on feat/npatch-libxposed-102. The build is split into three
@@ -166,7 +166,7 @@ jobs:
           staging="$RUNNER_TEMP/apks"
           mkdir -p "$staging"
           debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
-          cp "$debug_apk" "$staging/orange-ng-v${{ github.sha }}-debug.apk"
+          cp "$debug_apk" "$staging/lime-v${{ github.sha }}-debug.apk"
           echo "Staged debug APK:"
           ls -la "$staging"
 
@@ -174,7 +174,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: apk-debug-${{ github.sha }}
-          path: ${{ runner.temp }}/apks/orange-ng-v${{ github.sha }}-debug.apk
+          path: ${{ runner.temp }}/apks/lime-v${{ github.sha }}-debug.apk
           retention-days: 30
           if-no-files-found: error
 
@@ -225,12 +225,12 @@ jobs:
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && github.event_name != 'pull_request' }}
         id: keystore
         run: |
-          keystore_path="$RUNNER_TEMP/orange-release.jks"
+          keystore_path="$RUNNER_TEMP/lime-release.jks"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore_path"
-          echo "ORANGE_KEYSTORE_FILE=$keystore_path"      >> "$GITHUB_ENV"
-          printf 'ORANGE_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-          printf 'ORANGE_KEY_ALIAS=%s\n'         "$ANDROID_KEY_ALIAS"         >> "$GITHUB_ENV"
-          printf 'ORANGE_KEY_PASSWORD=%s\n'      "$ANDROID_KEY_PASSWORD"      >> "$GITHUB_ENV"
+          echo "LIME_KEYSTORE_FILE=$keystore_path"      >> "$GITHUB_ENV"
+          printf 'LIME_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          printf 'LIME_KEY_ALIAS=%s\n'         "$ANDROID_KEY_ALIAS"         >> "$GITHUB_ENV"
+          printf 'LIME_KEY_PASSWORD=%s\n'      "$ANDROID_KEY_PASSWORD"      >> "$GITHUB_ENV"
           echo "Keystore decoded to runner temp file (path not printed)."
 
       - name: Build release APK
@@ -254,7 +254,7 @@ jobs:
           staging="$RUNNER_TEMP/apks"
           mkdir -p "$staging"
           release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          cp "$release_apk" "$staging/orange-ng-v${{ github.sha }}-release.apk"
+          cp "$release_apk" "$staging/lime-v${{ github.sha }}-release.apk"
           echo "Staged release APK:"
           ls -la "$staging"
 
@@ -262,15 +262,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: apk-release-${{ github.sha }}
-          path: ${{ runner.temp }}/apks/orange-ng-v${{ github.sha }}-release.apk
+          path: ${{ runner.temp }}/apks/lime-v${{ github.sha }}-release.apk
           retention-days: 30
           if-no-files-found: error
 
       - name: Cleanup keystore (always, even on failure)
         if: always() && steps.keystore.outcome == 'success'
         run: |
-          if [ -f "$RUNNER_TEMP/orange-release.jks" ]; then
-            shred -u "$RUNNER_TEMP/orange-release.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/orange-release.jks"
+          if [ -f "$RUNNER_TEMP/lime-release.jks" ]; then
+            shred -u "$RUNNER_TEMP/lime-release.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/lime-release.jks"
           fi
           echo "Temporary keystore removed."
 
@@ -312,11 +312,11 @@ jobs:
       - name: Verify downloaded APKs
         run: |
           set -e
-          release_apk="$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-release.apk"
+          release_apk="$RUNNER_TEMP/apks/lime-v${{ github.sha }}-release.apk"
           test -s "$release_apk" || { echo "Release APK artifact missing or empty"; exit 1; }
           echo "Release APK: $release_apk ($(stat -c%s "$release_apk") bytes)"
           if [ "${{ inputs.debug }}" = "true" ]; then
-            debug_apk="$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-debug.apk"
+            debug_apk="$RUNNER_TEMP/apks/lime-v${{ github.sha }}-debug.apk"
             test -s "$debug_apk" || { echo "Debug APK artifact missing or empty (debug input was true)"; exit 1; }
             echo "Debug APK: $debug_apk ($(stat -c%s "$debug_apk") bytes)"
           else
@@ -330,11 +330,11 @@ jobs:
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           if [ -n "${{ inputs.tag }}" ]; then
             echo "release_tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "title=Orange-NG ${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "title=Lime ${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
             echo "Using custom tag: ${{ inputs.tag }}"
           else
             echo "release_tag=ci-$short_sha" >> "$GITHUB_OUTPUT"
-            echo "title=Orange-NG CI Build $short_sha" >> "$GITHUB_OUTPUT"
+            echo "title=Lime CI Build $short_sha" >> "$GITHUB_OUTPUT"
             echo "Using auto-generated CI tag: ci-$short_sha"
           fi
 
@@ -401,9 +401,9 @@ jobs:
         run: |
           # Build the asset list: always include the release APK; include the
           # debug APK only when the debug input is true.
-          assets=("$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-release.apk")
+          assets=("$RUNNER_TEMP/apks/lime-v${{ github.sha }}-release.apk")
           if [ "${{ inputs.debug }}" = "true" ]; then
-            assets+=("$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-debug.apk")
+            assets+=("$RUNNER_TEMP/apks/lime-v${{ github.sha }}-debug.apk")
           fi
           echo "Assets to attach: ${assets[@]}"
           # The release notes are the raw git-cliff output — no wrapping.

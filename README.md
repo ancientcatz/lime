@@ -1,99 +1,69 @@
-# Orange-NG
+# Lime
 
-Orange-NG is an [Xposed](https://github.com/libxposed/api) module that lets you specify screen
-orientation on a per-app basis. It is useful for apps that need a forced orientation to give the
-best experience (for example, forcing MAME4droid into landscape).
+Lime is an [Xposed](https://github.com/libxposed/api) module that pins screen orientation on a
+per-app basis. Useful for apps that need a forced orientation to give the best experience (e.g.
+forcing MAME4droid into landscape).
 
-This is the NPatch-compatible fork of the original Orange module, migrated to the modern
-libxposed API 102.
+Built against the modern libxposed API 102 and targeting NPatch (an LSPosed fork) in Local mode.
 
 ## Target platform
 
-| Platform        | Min API | Notes |
-|:----------------|:-------:|:------|
-| Android         | 30 (minSdk) / 33 (targetSdk, Android 13+) | minSdk preserved from the original; targetSdk bumped to 33 (Android 13). |
-| libxposed API   | 101     | `module.prop` declares `minApiVersion=101` and `targetApiVersion=102`. |
-| Framework       | NPatch (LSPosed fork) or any libxposed API 102 compatible framework. |
+| Platform      | Version                          |
+|:--------------|:---------------------------------|
+| Android       | minSdk 30 / targetSdk 33 (13+)   |
+| libxposed API | 102 (`minApiVersion=101`)        |
+| Framework     | NPatch or any libxposed 102 host |
 
 ## Module scope
 
-The module ships with `META-INF/xposed/scope.list` containing exactly:
+Ships with `META-INF/xposed/scope.list` containing exactly:
 
 ```
 com.seleuco.mame4droid
 ```
 
-This is the original module scope, preserved verbatim. To extend the module to additional apps,
-edit `app/src/main/resources/META-INF/xposed/scope.list` (one package name per line) and rebuild.
+To target additional apps, edit `app/src/main/resources/META-INF/xposed/scope.list` (one package
+per line) and rebuild.
 
 ## How it works
 
-1. The framework (NPatch in Local mode, or any libxposed API 102 compatible framework) loads
-   `lsposed.orange.hook.OrangeModule` into every process whose package appears in `scope.list`.
-2. `OrangeModule.onPackageLoaded` reads the configured orientation for the loaded package from the
-   framework's remote preferences (`getRemotePreferences("orange_config")`).
-3. `OrangeModule` installs an `Activity.attach` hook with `ExceptionMode.PROTECTIVE`. After the
-   original `attach()` returns, the hook sets `Activity.requestedOrientation` to the configured
-   value. If no configuration exists for the package, the hook does nothing — the app's own
-   orientation choice wins.
-4. The settings UI (launched from the home screen) writes the per-app configuration to a local
-   `SharedPreferences`. The custom `App` Application class registers an `XposedServiceHelper`
-   listener; when the framework delivers the `XposedService` binder, the local config is mirrored
-   into the framework's remote preferences where the hooked process can read it.
-
-This replaces the legacy `XSharedPreferences` + `MODE_WORLD_READABLE` SharedPreferences mechanism,
-which has been broken since Android N (targetSdk >= 24) without LSPosed-specific prefs rebinding.
+1. The framework loads `io.github.ancientcatz.lime.hook.LimeModule` into every process whose
+   package is in `scope.list`.
+2. `LimeModule.onPackageLoaded` reads the configured orientation for the loaded package from the
+   framework's remote preferences (`getRemotePreferences("lime_config")`).
+3. An `Activity.attach` hook (installed with `ExceptionMode.PROTECTIVE`) sets
+   `Activity.requestedOrientation` to the configured value after the original `attach()` returns.
+   If no configuration exists for the package, the hook does nothing — the app's own orientation
+   choice wins.
+4. The settings UI writes the per-app configuration to local `SharedPreferences`; the custom
+   `App` Application class mirrors it into the framework's remote preferences via
+   `XposedServiceHelper` so the hooked process can read it.
 
 ## Building
 
-Requirements:
-- JDK 21
-- Android SDK with `platforms;android-37` and `build-tools;37.0.0`
-- AGP 9.2.1 / Gradle 9.5.1 / Kotlin 2.0.21 (declared in `gradle/libs.versions.toml`)
+Requirements: JDK 21, Android SDK with `platforms;android-37.0` and `build-tools;37.0.0`.
 
-Local build (debug):
 ```
-./gradlew --warning-mode=all clean assembleDebug
-```
-
-Local build (release, unsigned — for local validation only):
-```
-./gradlew --warning-mode=all assembleRelease
-```
-
-Signed release build (requires a keystore provided via environment variables, as the CI does):
-```
-ORANGE_KEYSTORE_FILE=/path/to/keystore.jks \
-ORANGE_KEYSTORE_PASSWORD=... \
-ORANGE_KEY_ALIAS=... \
-ORANGE_KEY_PASSWORD=... \
-./gradlew --warning-mode=all assembleRelease
+./gradlew --warning-mode=all clean
+./gradlew --warning-mode=all assembleDebug
+./gradlew --warning-mode=all assembleRelease   # unsigned locally; CI signs via LIME_* env vars
 ```
 
 ## CI/CD
 
 GitHub Actions workflow at `.github/workflows/build.yml` builds, lints, tests, and signs both
-debug and release APKs. The build is split into three concurrent jobs that run in parallel on
-separate runners — `validate` (lint + unit tests), `build-debug`, and `build-release` — so
-debug and release APKs are produced concurrently rather than sequentially.
+debug and release APKs in three concurrent jobs (`validate`, `build-debug`, `build-release`).
 
-**Push events**: all three build/validate jobs run and upload their APKs as workflow artifacts
-(downloadable from the Actions run page). No draft release is created — this keeps the releases
-page clean and reserves releases for intentional cuts.
-
-**Manual dispatch** (workflow_dispatch): the same three jobs run concurrently, then a `release`
-job (which waits for all three to succeed) creates a draft GitHub Release. Accepts two optional
-inputs:
-- **`tag`** — Tag name for the release. Empty (default): tagged `ci-<short-sha>` (ad-hoc testable
-  build). Custom (e.g. `v1.3.0`): tagged with the provided value (versioned release).
-- **`debug`** — When `true`, the debug APK is also attached to the release. When `false`
-  (default), only the release APK is published — debug APKs are for development, not distribution.
+- **Push**: all three jobs run and upload APKs as workflow artifacts. No release is created.
+- **`workflow_dispatch`**: the same three jobs run, then a `release` job creates a draft GitHub
+  Release. Inputs:
+  - `tag` — release tag. Empty = `ci-<short-sha>` (ad-hoc CI build). Custom (e.g. `v1.4.0`) =
+    versioned release.
+  - `debug` — when `true`, the debug APK is also attached (default: release APK only).
 
 Release notes are generated by [git-cliff](https://github.com/orhun/git-cliff) via
-[`orhun/git-cliff-action@v4`](https://github.com/orhun/git-cliff-action), using the `cliff.toml`
-config in the repo root. The changelog covers only the commits since the previous release tag,
-with conventional-commit grouping, PR links, contributor credits, and a "Full Changelog" compare
-link.
+[`orhun/git-cliff-action@v4`](https://github.com/orhun/git-cliff-action) from the commit history
+since the previous tag.
 
 ## License
 

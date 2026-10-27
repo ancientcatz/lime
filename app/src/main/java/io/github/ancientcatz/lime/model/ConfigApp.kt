@@ -1,4 +1,4 @@
-package lsposed.orange.model
+package io.github.ancientcatz.lime.model
 
 import kotlinx.serialization.Serializable
 

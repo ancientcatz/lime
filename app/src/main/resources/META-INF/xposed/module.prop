@@ -1,5 +1,5 @@
-id=orange_ng
-name=Orange-NG
+id=lime
+name=Lime
 description=Specifying orientation per app
 minApiVersion=101
 targetApiVersion=102

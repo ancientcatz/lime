@@ -6,7 +6,7 @@
     android:layout_height="match_parent"
     tools:context=".ui.MainActivity">
 
-    <lsposed.orange.ui.main.RecordScrollRecyclerView
+    <io.github.ancientcatz.lime.ui.main.RecordScrollRecyclerView
         android:id="@+id/app_list"
         android:layout_width="match_parent"
         android:layout_height="match_parent"

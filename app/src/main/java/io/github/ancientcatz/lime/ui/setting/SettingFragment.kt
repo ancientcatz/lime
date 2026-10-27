@@ -1,4 +1,4 @@
-package lsposed.orange.ui.setting
+package io.github.ancientcatz.lime.ui.setting
 
 import android.content.ComponentName
 import android.content.Intent
@@ -9,8 +9,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreferenceCompat
-import lsposed.orange.BuildConfig
-import lsposed.orange.R
+import io.github.ancientcatz.lime.BuildConfig
+import io.github.ancientcatz.lime.R
 
 class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceChangeListener {
 

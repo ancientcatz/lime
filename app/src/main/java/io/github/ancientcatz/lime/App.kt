@@ -1,4 +1,4 @@
-package lsposed.orange
+package io.github.ancientcatz.lime
 
 import android.app.Application
 import android.util.Log
@@ -6,12 +6,12 @@ import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import lsposed.orange.model.ConfigApp
+import io.github.ancientcatz.lime.model.ConfigApp
 import java.util.concurrent.CopyOnWriteArraySet
 import kotlin.concurrent.Volatile
 
 /**
- * Orange-NG Application entry point.
+ * Lime Application entry point.
  *
  * Registers itself as an [XposedServiceHelper.OnServiceListener] so the module's settings process
  * can acquire the [XposedService] binder from the framework (NPatch in Local mode, or LSPosed).
@@ -20,7 +20,7 @@ import kotlin.concurrent.Volatile
  * `XSharedPreferences` + `MODE_WORLD_READABLE` SharedPreferences combination (which has been
  * broken since Android N when targetSdk >= 24). When the binder is available, settings written in
  * this process are mirrored into the framework's remote preferences under the group name
- * [REMOTE_PREFS_NAME], where [lsposed.orange.hook.OrangeModule] reads them inside hooked target
+ * [REMOTE_PREFS_NAME], where [io.github.ancientcatz.lime.hook.LimeModule] reads them inside hooked target
  * processes via [io.github.libxposed.api.XposedInterface.getRemotePreferences].
  *
  * Per the libxposed/service documentation, the [XposedProvider] inside this library is Direct Boot
@@ -31,8 +31,8 @@ import kotlin.concurrent.Volatile
 class App : Application(), XposedServiceHelper.OnServiceListener {
 
     companion object {
-        const val TAG = "OrangeApp"
-        const val REMOTE_PREFS_NAME = "orange_config"
+        const val TAG = "LimeApp"
+        const val REMOTE_PREFS_NAME = "lime_config"
         const val KEY_CONFIG_APPS = "config_apps"
         internal const val DEFAULT_JSON_EMPTY_ARRAY = "[]"
 
@@ -133,7 +133,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
 
     /**
      * Notified whenever the [XposedService] binder is acquired or lost. Used by
-     * [lsposed.orange.ui.main.MainFragment] to refresh the "module active" indicator in the title.
+     * [io.github.ancientcatz.lime.ui.main.MainFragment] to refresh the "module active" indicator in the title.
      */
     interface ServiceStateListener {
         fun onServiceStateChanged(service: XposedService?)

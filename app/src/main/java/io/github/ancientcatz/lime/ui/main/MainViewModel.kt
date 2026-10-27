@@ -1,4 +1,4 @@
-package lsposed.orange.ui.main
+package io.github.ancientcatz.lime.ui.main
 
 import android.app.Application
 import android.content.SharedPreferences
@@ -11,9 +11,9 @@ import androidx.preference.PreferenceManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import lsposed.orange.R
-import lsposed.orange.SharedConfig
-import lsposed.orange.model.Orientation
+import io.github.ancientcatz.lime.R
+import io.github.ancientcatz.lime.SharedConfig
+import io.github.ancientcatz.lime.model.Orientation
 
 class MainViewModel(app: Application) : AndroidViewModel(app),
     SharedPreferences.OnSharedPreferenceChangeListener {

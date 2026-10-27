@@ -1,4 +1,4 @@
-package lsposed.orange
+package io.github.ancientcatz.lime
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -6,7 +6,7 @@ import android.util.Log
 import androidx.core.content.edit
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import lsposed.orange.model.ConfigApp
+import io.github.ancientcatz.lime.model.ConfigApp
 import java.io.File
 import java.util.Properties
 
@@ -14,7 +14,7 @@ internal const val KEY_CONFIG_APPS = "config_apps"
 internal const val DEFAULT_JSON_EMPTY_ARRAY = "[]"
 
 /**
- * Shared configuration access for Orange-NG.
+ * Shared configuration access for Lime.
  *
  * Two concrete subclasses:
  *  - [Fetcher] is used inside hooked target processes. It reads from a
@@ -45,7 +45,7 @@ sealed class SharedConfig {
 
     /**
      * Read-only config view used inside hooked target processes. The [SharedPreferences] instance
-     * is supplied by [lsposed.orange.hook.OrangeModule] from
+     * is supplied by [io.github.ancientcatz.lime.hook.LimeModule] from
      * [io.github.libxposed.api.XposedInterface.getRemotePreferences].
      */
     class Fetcher(private val prefs: SharedPreferences) : SharedConfig() {
@@ -99,12 +99,12 @@ sealed class SharedConfig {
                     }
                 }
                 if (legacyFile.delete()) {
-                    Log.i("OrangeConfig", "Migrated legacy configs.properties into SharedPreferences; legacy file deleted")
+                    Log.i("LimeConfig", "Migrated legacy configs.properties into SharedPreferences; legacy file deleted")
                 } else {
-                    Log.w("OrangeConfig", "Migrated legacy configs.properties but failed to delete the legacy file")
+                    Log.w("LimeConfig", "Migrated legacy configs.properties but failed to delete the legacy file")
                 }
             } catch (t: Throwable) {
-                Log.e("OrangeConfig", "Failed to migrate legacy configs.properties; leaving it in place", t)
+                Log.e("LimeConfig", "Failed to migrate legacy configs.properties; leaving it in place", t)
             }
         }
 
@@ -113,7 +113,7 @@ sealed class SharedConfig {
 
         /**
          * Persist a generic preference change. Called by
-         * [lsposed.orange.ui.main.MainViewModel.onSharedPreferenceChanged]. Triggers a remote
+         * [io.github.ancientcatz.lime.ui.main.MainViewModel.onSharedPreferenceChanged]. Triggers a remote
          * sync so the change is visible to the hooked process.
          */
         fun savePref(key: String) {

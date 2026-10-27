@@ -1,4 +1,4 @@
-package lsposed.orange.ui.main
+package io.github.ancientcatz.lime.ui.main
 
 import android.content.Context
 import android.util.AttributeSet

@@ -1,4 +1,4 @@
-# Version catalog for Orange-NG (NPatch / libxposed API 102 migration).
+# Version catalog for Lime (NPatch / libxposed API 102).
 # Versions are pinned to match the official libxposed example module, so dependency
 # compatibility is validated by upstream.
 
