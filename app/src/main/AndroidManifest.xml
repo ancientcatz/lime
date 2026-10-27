@@ -21,6 +21,8 @@
     -->
     <application
         android:name=".App"
+        android:icon="@mipmap/noto_lime"
+        android:roundIcon="@mipmap/noto_lime_round"
         android:label="@string/app_name"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
 
