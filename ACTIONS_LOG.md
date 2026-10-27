@@ -191,6 +191,53 @@ investigated, and any fixes pushed.
 
 ---
 
+## Run 40450657195
+
+- **Commit**: `3ceeb1c5337a6ee3d0cfad0abf28e9752494d973` (`3ceeb1c`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T04:36:23Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40450657195
+
+### Jobs
+- `build`: success (2m0s) — 33% faster than the previous run (2m59s) thanks to the
+  concurrent debug+release build + Gradle parallel mode.
+- `release`: success (7s) — draft release created with both APKs.
+
+### Logs inspected
+- Full step-by-step logs inspected. The two previously separate "Build debug APK" and
+  "Build release APK" steps are now a single "Build debug and release APKs concurrently"
+  step that runs `./gradlew --warning-mode=all --no-daemon --parallel assembleDebug assembleRelease`.
+- Build produced:
+  - `app/build/outputs/apk/debug/app-debug.apk` (10.0 MB)
+  - `app/build/outputs/apk/release/app-release.apk` (1.5 MB, signed with v3 scheme)
+- Release APK signature verified by `apksigner verify --verbose`:
+  `Verifies`, `Verified using v3 scheme (APK Signature Scheme v3): true`.
+- Both APKs staged with predictable names and uploaded as workflow artifact `apks-3ceeb1c...`.
+- Draft release `ci-3ceeb1c5337a` created with both APKs attached.
+- Verified zero Kotlin warnings (`w:` prefix) in the entire run log — the 5 deprecation
+  warnings from the previous run (setHasOptionsMenu / onCreateOptionsMenu /
+  onOptionsItemSelected and their override counterparts) are GONE after migrating
+  MainFragment to the MenuProvider API.
+
+### Warnings found
+- Only the informational `ubuntu-latest will migrate to Ubuntu 26 beginning October 19, 2026`
+  notice (no action possible from the workflow side; this is a GitHub-hosted runner image
+  lifecycle announcement).
+
+### Fixes applied
+- None needed. This is the final successful run.
+
+### Draft release
+- Tag: `ci-3ceeb1c5337a`
+- URL: https://github.com/ancientcatz/Orange-NG/releases (draft, not published)
+- Assets:
+  - `orange-ng-v3ceeb1c5337a6ee3d0cfad0abf28e9752494d973-debug.apk` (10,045,961 bytes)
+  - `orange-ng-v3ceeb1c5337a6ee3d0cfad0abf28e9752494d973-release.apk` (1,473,393 bytes)
+
+---
+
 ## Summary
 
 | Run ID | Commit | Conclusion | Duration | Draft release |
@@ -200,6 +247,10 @@ investigated, and any fixes pushed.
 | 40448182748 | 2871a2f | failure | 1m1s | — |
 | 40448483874 | e1d0c2a | success | 4m33s | ci-e1d0c2ad6bef |
 | 40449028782 | 8084597 | success | 3m8s | ci-80845972943c |
+| 40450657195 | 3ceeb1c | success | 2m7s | ci-3ceeb1c5337a |
 
-The final successful run (40449028782) corresponds to the actual final implementation commit
-(8084597). Both APKs are attached to its draft release. No actionable warnings remain.
+The final successful run (40450657195) corresponds to the actual final implementation commit
+(3ceeb1c5337a6ee3d0cfad0abf28e9752494d973). Both APKs are attached to its draft release.
+Zero Kotlin warnings remain (the 5 deprecation warnings from run 40449028782 were fixed by
+migrating MainFragment to the MenuProvider API). Build time dropped 33% (2m59s -> 2m0s)
+thanks to the concurrent debug+release build + Gradle parallel mode.
