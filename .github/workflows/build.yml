@@ -1,26 +1,34 @@
 name: Build, sign, and publish Orange-NG
 
 # This workflow builds, lints, tests, and signs both debug and release APKs for every
-# implementation commit on feat/npatch-libxposed-102. A draft GitHub Release is ONLY created
-# when the workflow is triggered manually via workflow_dispatch — push events run the full
-# build/lint/test/sign pipeline (so CI validates every commit and produces downloadable APK
-# artifacts) but do NOT create a release, to avoid cluttering the releases page.
+# implementation commit on feat/npatch-libxposed-102. The build is split into three
+# concurrent jobs (validate, build-debug, build-release) that run in parallel on separate
+# runners — mimicking the approach used for separate ABI builds — so debug and release
+# APKs are produced concurrently rather than sequentially within a single Gradle invocation.
 #
-# workflow_dispatch accepts an optional `tag` input. If provided (e.g. "v1.3.0"), the release
-# is created under that tag — useful for cutting a real versioned release. If left empty, the
-# release is created under the auto-generated `ci-<short-sha>` tag — useful for ad-hoc
-# testable builds off the latest commit.
+# A draft GitHub Release is ONLY created when the workflow is triggered manually via
+# workflow_dispatch — push events run the full build/lint/test/sign pipeline (so CI
+# validates every commit and produces downloadable APK artifacts) but do NOT create a
+# release, to avoid cluttering the releases page.
 #
-# Pull-request runs use the same build/lint/test pipeline but skip signing and the release job,
-# so untrusted PR code never sees signing secrets.
+# workflow_dispatch accepts two optional inputs:
+#   - tag:   Tag name for the release (e.g. "v1.3.0"). If provided, the release is created
+#            under that tag — useful for cutting a real versioned release. If left empty,
+#            the release is created under the auto-generated ci-<short-sha> tag.
+#   - debug: When true, the debug APK is also attached to the release (in addition to the
+#            release APK). When false (default), only the release APK is published — debug
+#            APKs are for development, not distribution.
+#
+# Pull-request runs use the same build/lint/test pipeline but skip signing and the release
+# job, so untrusted PR code never sees signing secrets.
 #
 # Security notes:
 #  - The personal access token is NEVER embedded in this workflow. We use the automatically
 #    provided GITHUB_TOKEN for all GitHub operations (creating releases, uploading assets).
-#  - Signing secrets are only referenced inside the build job, and only conditionally — for
-#    pull_request events the workflow skips the signing step entirely.
-#  - The release job runs with contents:write permission. The build job uses only the default
-#    permissions.
+#  - Signing secrets are only referenced inside the build-release job, and only conditionally
+#    — for pull_request events the workflow skips the signing step entirely.
+#  - The release job runs with contents:write permission. All other jobs use only the
+#    default permissions.
 #  - Third-party actions are pinned to specific major versions.
 
 on:
@@ -41,6 +49,11 @@ on:
         required: false
         default: ""
         type: string
+      debug:
+        description: "Include the debug APK in the release (default: release APK only)."
+        required: false
+        default: false
+        type: boolean
 
 # Concurrency: cancel in-flight runs of the SAME event type on the SAME ref.
 # By including github.event_name in the group, a push does NOT cancel a
@@ -56,26 +69,15 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build, lint, test, sign
+  # ─────────────────────────────────────────────────────────────────────────────
+  # validate: runs lint + unit tests. Fast, no signing needed, runs on all events.
+  # ─────────────────────────────────────────────────────────────────────────────
+  validate:
+    name: Lint + unit tests
     runs-on: ubuntu-latest
-    env:
-      # The four signing secrets are stored under ANDROID_* names. We expose them to the workflow
-      # via these env vars so the decode step can find them. The Gradle build reads
-      # ORANGE_KEYSTORE_FILE (a PATH, set after decoding), ORANGE_KEYSTORE_PASSWORD,
-      # ORANGE_KEY_ALIAS, and ORANGE_KEY_PASSWORD — all four are intentionally left empty here
-      # so the decode step (which runs only on push/workflow_dispatch) can decide whether to
-      # populate them. For pull_request runs these stay empty and the release APK is built
-      # unsigned, which is what we want for PR validation.
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
-      - name: Checkout exact commit
+      - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
 
       - name: Set up JDK 21
         uses: actions/setup-java@v6
@@ -83,29 +85,15 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK components (sdkmanager directly)
-        # The ubuntu-latest runner ships with Android SDK cmdline-tools pre-installed at
-        # /usr/local/lib/android/sdk. We install the specific platform and build-tools we need
-        # via sdkmanager directly. This avoids the android-actions/setup-android action, which
-        # mishandles multi-line `packages` inputs (it joins them with newlines and passes the
-        # result as a single package name, causing "Failed to find package" errors).
-        #
-        # Note: the platform package name is `platforms;android-37.0` (with the .0 suffix), not
-        # `platforms;android-37`. The sdkmanager repository lists 37.0, 37.1, and 37.2 as
-        # distinct packages; the unsuffixed `android-37` alias is not published.
+      - name: Set up Android SDK components
         run: |
           set -e
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          # Accept licenses non-interactively so sdkmanager does not prompt.
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          # Install the three packages we need. Pass them as separate arguments so sdkmanager
-          # sees each one distinctly.
           sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
-          # Verify the components are actually installed.
           test -d "$ANDROID_HOME/platforms/android-37.0" || { echo "platforms;android-37.0 missing"; exit 1; }
           test -d "$ANDROID_HOME/build-tools/37.0.0" || { echo "build-tools;37.0.0 missing"; exit 1; }
-          echo "Android SDK components installed."
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Cache Gradle
@@ -120,79 +108,161 @@ jobs:
       - name: Validate Gradle configuration
         run: ./gradlew --version
 
-      - name: Clean
-        run: ./gradlew --warning-mode=all --no-daemon clean
-
       - name: Lint (debug)
         run: ./gradlew --warning-mode=all --no-daemon lintDebug
 
       - name: Unit tests (debug)
         run: ./gradlew --warning-mode=all --no-daemon testDebugUnitTest
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # build-debug: builds the debug APK. No signing secrets needed (uses the standard
+  # Android debug keystore). Runs on all events including pull requests.
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-debug:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK components
+        run: |
+          set -e
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+          test -d "$ANDROID_HOME/platforms/android-37.0" || { echo "platforms;android-37.0 missing"; exit 1; }
+          test -d "$ANDROID_HOME/build-tools/37.0.0" || { echo "build-tools;37.0.0 missing"; exit 1; }
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - name: Cache Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build debug APK
+        run: ./gradlew --warning-mode=all --no-daemon assembleDebug
+
+      - name: Verify debug APK exists and is non-empty
+        run: |
+          set -e
+          debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          test -s "$debug_apk" || { echo "Debug APK missing or empty: $debug_apk"; exit 1; }
+          echo "Debug APK: $debug_apk ($(stat -c%s "$debug_apk") bytes)"
+
+      - name: Stage debug APK with a predictable name
+        run: |
+          staging="$RUNNER_TEMP/apks"
+          mkdir -p "$staging"
+          debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          cp "$debug_apk" "$staging/orange-ng-v${{ github.sha }}-debug.apk"
+          echo "Staged debug APK:"
+          ls -la "$staging"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: apk-debug-${{ github.sha }}
+          path: ${{ runner.temp }}/apks/orange-ng-v${{ github.sha }}-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # build-release: builds the release APK. Needs signing secrets (only available
+  # on push/workflow_dispatch, not on pull_request). On PR, builds unsigned for
+  # validation that R8 + resource shrinking work.
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-release:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK components
+        run: |
+          set -e
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+          test -d "$ANDROID_HOME/platforms/android-37.0" || { echo "platforms;android-37.0 missing"; exit 1; }
+          test -d "$ANDROID_HOME/build-tools/37.0.0" || { echo "build-tools;37.0.0 missing"; exit 1; }
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - name: Cache Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - name: Decode release keystore (only when secrets are available)
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && github.event_name != 'pull_request' }}
         id: keystore
         run: |
-          # Decode the Base64-encoded keystore from the secret into a temporary runner file.
-          # The file lives only on the runner and is wiped in the post step below.
           keystore_path="$RUNNER_TEMP/orange-release.jks"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore_path"
-          # Expose the four ORANGE_* env vars that Gradle reads. The keystore FILE is the path
-          # to the decoded file; the other three are passed through verbatim from the ANDROID_*
-          # secrets. The passwords are piped via stdin to printf so they never appear in the
-          # process list — printf is a shell builtin so there is no /proc/<pid>/cmdline leak.
           echo "ORANGE_KEYSTORE_FILE=$keystore_path"      >> "$GITHUB_ENV"
           printf 'ORANGE_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           printf 'ORANGE_KEY_ALIAS=%s\n'         "$ANDROID_KEY_ALIAS"         >> "$GITHUB_ENV"
           printf 'ORANGE_KEY_PASSWORD=%s\n'      "$ANDROID_KEY_PASSWORD"      >> "$GITHUB_ENV"
           echo "Keystore decoded to runner temp file (path not printed)."
 
-      - name: Build debug and release APKs concurrently
-        # Combine assembleDebug and assembleRelease into a single Gradle invocation so the
-        # configuration phase runs once (instead of twice), and so Gradle's --parallel mode
-        # (enabled via org.gradle.parallel=true in gradle.properties) can run the per-variant
-        # tasks (debug dexing vs release R8+dexing) concurrently. The two variants share most
-        # of the pipeline (resource merging, Java/Kotlin compilation), which Gradle
-        # de-duplicates automatically when both are requested in the same invocation.
-        run: ./gradlew --warning-mode=all --no-daemon --parallel assembleDebug assembleRelease
+      - name: Build release APK
+        run: ./gradlew --warning-mode=all --no-daemon assembleRelease
 
-      - name: Verify both APKs exist and are non-empty
+      - name: Verify release APK exists and is non-empty
         run: |
           set -e
-          debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          test -s "$debug_apk" || { echo "Debug APK missing or empty: $debug_apk"; exit 1; }
           test -s "$release_apk" || { echo "Release APK missing or empty: $release_apk"; exit 1; }
-          echo "Debug APK:   $debug_apk ($(stat -c%s "$debug_apk") bytes)"
           echo "Release APK: $release_apk ($(stat -c%s "$release_apk") bytes)"
 
       - name: Verify release APK signature (only when signed)
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && github.event_name != 'pull_request' }}
         run: |
           release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          # apksigner exits non-zero if the APK is not signed or the signature is invalid.
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$release_apk"
 
-      - name: Stage APKs with predictable names
+      - name: Stage release APK with a predictable name
         run: |
-          # Copy both APKs to a staging directory with predictable names so the upload-artifact
-          # step and the release job can reference them without globbing.
           staging="$RUNNER_TEMP/apks"
           mkdir -p "$staging"
-          debug_apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           release_apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          cp "$debug_apk" "$staging/orange-ng-v${{ github.sha }}-debug.apk"
-          # If the release APK is signed it's named app-release.apk; if unsigned it's
-          # app-release-unsigned.apk. Normalize to a single name.
           cp "$release_apk" "$staging/orange-ng-v${{ github.sha }}-release.apk"
-          echo "Staged APKs:"
+          echo "Staged release APK:"
           ls -la "$staging"
 
-      - name: Upload APK artifacts
+      - name: Upload release APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: apks-${{ github.sha }}
-          path: ${{ runner.temp }}/apks/*.apk
+          name: apk-release-${{ github.sha }}
+          path: ${{ runner.temp }}/apks/orange-ng-v${{ github.sha }}-release.apk
           retention-days: 30
           if-no-files-found: error
 
@@ -204,12 +274,17 @@ jobs:
           fi
           echo "Temporary keystore removed."
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # release: creates or updates a draft GitHub Release. Only runs on
+  # workflow_dispatch. Waits for validate + build-debug + build-release to all
+  # succeed, then downloads the APK artifacts and creates the release.
+  #
+  # By default (debug input = false), only the release APK is attached. When
+  # debug input = true, the debug APK is also attached.
+  # ─────────────────────────────────────────────────────────────────────────────
   release:
     name: Create or update draft release
-    needs: build
-    # Only create a draft release on manual workflow_dispatch. Push events run the full
-    # build/lint/test/sign pipeline (via the build job above) but do NOT create a release —
-    # this keeps the releases page clean and reserves releases for intentional cuts.
+    needs: [validate, build-debug, build-release]
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
@@ -218,31 +293,38 @@ jobs:
       - name: Checkout (full history + tags for git-cliff)
         uses: actions/checkout@v6
         with:
-          # fetch-depth: 0 is required by orhun/git-cliff-action so git-cliff can
-          # walk the full commit history and find the previous tag to compare
-          # against. With the default fetch-depth: 1, git-cliff would only see
-          # the single HEAD commit and emit an empty or single-commit changelog.
           fetch-depth: 0
-          # fetch-tags: true is required so the upstream v* tags (v1.0.0, v1.0.1,
-          # v1.1.0) and any previous ci-* tags are present in the local checkout.
-          # Without this, actions/checkout passes --no-tags to git fetch, which
-          # prevents git-cliff from finding the previous tag and causes it to
-          # emit all commits from the beginning of history instead of just the
-          # commits since the previous release.
           fetch-tags: true
 
-      - name: Download APK artifacts
+      - name: Download release APK artifact
         uses: actions/download-artifact@v8
         with:
-          name: apks-${{ github.sha }}
+          name: apk-release-${{ github.sha }}
           path: ${{ runner.temp }}/apks
+
+      - name: Download debug APK artifact (only when debug input is enabled)
+        if: ${{ inputs.debug == true }}
+        uses: actions/download-artifact@v8
+        with:
+          name: apk-debug-${{ github.sha }}
+          path: ${{ runner.temp }}/apks
+
+      - name: Verify downloaded APKs
+        run: |
+          set -e
+          release_apk="$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-release.apk"
+          test -s "$release_apk" || { echo "Release APK artifact missing or empty"; exit 1; }
+          echo "Release APK: $release_apk ($(stat -c%s "$release_apk") bytes)"
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            debug_apk="$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-debug.apk"
+            test -s "$debug_apk" || { echo "Debug APK artifact missing or empty (debug input was true)"; exit 1; }
+            echo "Debug APK: $debug_apk ($(stat -c%s "$debug_apk") bytes)"
+          else
+            echo "Debug APK: not downloaded (debug input is false — release will contain only the release APK)"
+          fi
 
       - name: Compute release tag and title
         id: meta
-        # If the workflow_dispatch `tag` input is provided (e.g. "v1.3.0"), use it as the
-        # release tag and title. Otherwise fall back to the auto-generated ci-<short-sha>
-        # tag and "Orange-NG CI Build <short-sha>" title. The `is_custom_tag` output is
-        # used downstream to pick the appropriate disclaimer in the release notes.
         run: |
           short_sha=${GITHUB_SHA::12}
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
@@ -258,44 +340,24 @@ jobs:
             echo "Using auto-generated CI tag: ci-$short_sha"
           fi
 
-      - name: Delete existing draft release for this tag (if any, so a rerun doesn't leave stale assets)
-        # Delete the draft release WITHOUT --cleanup-tag so the real git tag (pushed by a
-        # previous run) survives. The tag is needed by the NEXT run's git-cliff so it can
-        # compare against the previous release. If we used --cleanup-tag, the tag would be
-        # deleted and the next run would lose the comparison baseline.
+      - name: Delete existing draft release for this tag (if any)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           if gh release view "${{ steps.meta.outputs.release_tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Existing release found for tag ${{ steps.meta.outputs.release_tag }}; deleting and recreating to ensure asset freshness (tag preserved)."
+            echo "Existing release found for tag ${{ steps.meta.outputs.release_tag }}; deleting and recreating (tag preserved)."
             gh release delete "${{ steps.meta.outputs.release_tag }}" --repo "$GITHUB_REPOSITORY" --yes
           else
             echo "No existing release for tag ${{ steps.meta.outputs.release_tag }}; creating fresh."
           fi
 
       - name: Create local tag at HEAD for git-cliff
-        # Create a lightweight local tag at HEAD so git-cliff's --latest flag treats HEAD
-        # as the newest tagged release and emits the commits between the previous tag
-        # (fetched from the remote by the checkout step) and HEAD. Use git tag -f so a
-        # rerun of the same commit/tag (which already has a local tag from a previous step
-        # attempt) does not fail.
         run: |
           git tag -f "${{ steps.meta.outputs.release_tag }}" HEAD
           echo "Created local tag ${{ steps.meta.outputs.release_tag }} at HEAD for git-cliff."
 
       - name: Generate changelog with git-cliff
-        # Uses orhun/git-cliff-action@v4 to generate the release notes from the
-        # commit history. The cliff.toml config in the repo root enables:
-        #   - conventional-commit grouping (Features / Bug Fixes / Refactor / etc.)
-        #   - GitHub integration (PR links, contributor credits, "Full Changelog"
-        #     compare link between the previous tag and the new release tag)
-        # --latest --strip header emits only the section for the latest tag
-        # (the release tag), without the global "# Changelog" header.
-        #
-        # git-cliff picks the locally-created tag as the latest, finds the previous tag
-        # reachable from HEAD (e.g. v1.1.0, a previous ci-* tag, or a previous custom
-        # release tag), and emits only the commits between them.
         id: git_cliff
         uses: orhun/git-cliff-action@v4
         with:
@@ -304,34 +366,9 @@ jobs:
         env:
           OUTPUT: ${{ runner.temp }}/git-cliff-changelog.md
           GITHUB_REPO: ${{ github.repository }}
-          # GITHUB_TOKEN is supplied to git-cliff's GitHub integration so it can
-          # fetch PR metadata and contributor info without hitting the anonymous
-          # rate limit. The default workflow token has read access to public
-          # repos and write access to this repo, which is sufficient.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push tag to remote (so the next CI run can compare against it)
-        # Draft releases created by `gh release create --draft` do NOT push a real
-        # git tag to the remote — the tag exists only as metadata on the release
-        # object and is materialized as a git ref only when the release is
-        # published. This means the next CI run's checkout cannot fetch the
-        # previous tag, and git-cliff cannot find a previous release to compare
-        # against.
-        #
-        # To fix this, we push the release tag as a real lightweight git tag to
-        # the remote. The push is idempotent: if the tag already exists at the
-        # same commit, git says "Everything up-to-date" and exits 0. If the tag
-        # exists at a different commit (e.g. re-dispatching with the same custom
-        # tag on a new commit), we force-push to move it.
-        #
-        # We push BEFORE creating the draft release so that `gh release create`
-        # can associate the release with the already-existing tag rather than
-        # trying to create a new one.
-        #
-        # Authentication: actions/checkout@v6 with persist-credentials: true (the
-        # default) stores the GITHUB_TOKEN in the local git config's
-        # http.<url>.extraheader, so `git push` authenticates automatically without
-        # the token appearing in the command line, the push output, or shell history.
+      - name: Push tag to remote
         run: |
           if git push origin "${{ steps.meta.outputs.release_tag }}" 2>&1; then
             echo "Tag ${{ steps.meta.outputs.release_tag }} pushed to remote (or already up-to-date)."
@@ -346,8 +383,6 @@ jobs:
         run: |
           branch=${GITHUB_REF#refs/heads/}
           build_date=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          # Pick the disclaimer based on whether this is a custom-tagged release
-          # (e.g. v1.3.0) or an auto-generated CI build (ci-<short-sha>).
           if [ "${{ steps.meta.outputs.is_custom_tag }}" = "true" ]; then
             header="## ${{ steps.meta.outputs.title }}"
             disclaimer="> This is a draft release prepared by CI from the \`$branch\` branch. Review the changelog and assets, then publish the release when ready. The signing identity is temporary and may be replaced later (which would require uninstalling any previously installed build before upgrading)."
@@ -364,16 +399,23 @@ jobs:
             echo "| Commit | [\`$GITHUB_SHA\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA) |"
             echo "| Built | $build_date |"
             echo "| Run | [$GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) |"
+            echo "| Debug APK included | ${{ inputs.debug }} |"
             echo ""
             echo "### Artifacts"
             echo ""
-            echo "- \`orange-ng-v$GITHUB_SHA-debug.apk\` — debug build, signed with the Android debug key."
             echo "- \`orange-ng-v$GITHUB_SHA-release.apk\` — release build, signed with the temporary CI keystore (will be replaced with a permanent signing identity before any stable release)."
+            if [ "${{ inputs.debug }}" = "true" ]; then
+              echo "- \`orange-ng-v$GITHUB_SHA-debug.apk\` — debug build, signed with the Android debug key."
+            fi
             echo ""
             echo "### Install"
             echo ""
             echo "1. Make sure NPatch (or another libxposed API 102 compatible framework) is installed and enabled."
-            echo "2. Install the release APK (or the debug APK for development)."
+            if [ "${{ inputs.debug }}" = "true" ]; then
+              echo "2. Install the release APK (or the debug APK for development)."
+            else
+              echo "2. Install the release APK."
+            fi
             echo "3. Enable the Orange-NG module in NPatch and confirm the scope includes \`com.seleuco.mame4droid\`."
             echo "4. Force-stop or reboot the target app, then verify the configured orientation is applied."
             echo ""
@@ -394,18 +436,24 @@ jobs:
           echo "--- First 30 lines ---"
           head -30 "$RUNNER_TEMP/release-notes.md"
 
-      - name: Create draft release with both APKs
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Build the asset list: always include the release APK; include the
+          # debug APK only when the debug input is true.
+          assets=("$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-release.apk")
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            assets+=("$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-debug.apk")
+          fi
+          echo "Assets to attach: ${assets[@]}"
           gh release create "${{ steps.meta.outputs.release_tag }}" \
             --repo "$GITHUB_REPOSITORY" \
             --target feat/npatch-libxposed-102 \
             --title "${{ steps.meta.outputs.title }}" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             --draft \
-            "$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-debug.apk" \
-            "$RUNNER_TEMP/apks/orange-ng-v${{ github.sha }}-release.apk"
+            "${assets[@]}"
 
       - name: Verify release assets
         env:
