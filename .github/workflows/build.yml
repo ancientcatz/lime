@@ -1,8 +1,15 @@
 name: Build, sign, and publish Orange-NG
 
-# This workflow builds, lints, tests, signs, and publishes both debug and release APKs for
-# every implementation commit on feat/npatch-libxposed-102. Both APKs are attached to a draft
-# GitHub Release tagged ci-<short-sha> so each commit has its own testable artifacts.
+# This workflow builds, lints, tests, and signs both debug and release APKs for every
+# implementation commit on feat/npatch-libxposed-102. A draft GitHub Release is ONLY created
+# when the workflow is triggered manually via workflow_dispatch — push events run the full
+# build/lint/test/sign pipeline (so CI validates every commit and produces downloadable APK
+# artifacts) but do NOT create a release, to avoid cluttering the releases page.
+#
+# workflow_dispatch accepts an optional `tag` input. If provided (e.g. "v1.3.0"), the release
+# is created under that tag — useful for cutting a real versioned release. If left empty, the
+# release is created under the auto-generated `ci-<short-sha>` tag — useful for ad-hoc
+# testable builds off the latest commit.
 #
 # Pull-request runs use the same build/lint/test pipeline but skip signing and the release job,
 # so untrusted PR code never sees signing secrets.
@@ -28,13 +35,20 @@ on:
     branches:
       - feat/npatch-libxposed-102
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name for the release (e.g. v1.3.0). Leave empty to use ci-<short-sha>."
+        required: false
+        default: ""
+        type: string
 
-# Cancel any in-flight run for the same ref when a new commit lands. This avoids wasted runner
-# minutes when several commits are pushed in quick succession, but does NOT cancel the run that
-# actually produces the draft release for a given commit (because the latest commit's run is the
-# one that survives).
+# Concurrency: cancel in-flight runs of the SAME event type on the SAME ref.
+# By including github.event_name in the group, a push does NOT cancel a
+# workflow_dispatch release (and vice versa) — they run independently. Multiple
+# pushes in quick succession still cancel each other (good — saves runner
+# minutes), and multiple dispatches in quick succession cancel each other too.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Least-privilege defaults. The release job escalates to contents:write at the job level.
@@ -193,7 +207,10 @@ jobs:
   release:
     name: Create or update draft release
     needs: build
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    # Only create a draft release on manual workflow_dispatch. Push events run the full
+    # build/lint/test/sign pipeline (via the build job above) but do NOT create a release —
+    # this keeps the releases page clean and reserves releases for intentional cuts.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write  # needed to create draft releases and tags
@@ -220,15 +237,28 @@ jobs:
           name: apks-${{ github.sha }}
           path: ${{ runner.temp }}/apks
 
-      - name: Compute CI tag and release title
+      - name: Compute release tag and title
         id: meta
+        # If the workflow_dispatch `tag` input is provided (e.g. "v1.3.0"), use it as the
+        # release tag and title. Otherwise fall back to the auto-generated ci-<short-sha>
+        # tag and "Orange-NG CI Build <short-sha>" title. The `is_custom_tag` output is
+        # used downstream to pick the appropriate disclaimer in the release notes.
         run: |
           short_sha=${GITHUB_SHA::12}
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
-          echo "ci_tag=ci-$short_sha" >> "$GITHUB_OUTPUT"
-          echo "title=Orange-NG CI Build $short_sha" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "release_tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "title=Orange-NG ${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "is_custom_tag=true" >> "$GITHUB_OUTPUT"
+            echo "Using custom tag: ${{ inputs.tag }}"
+          else
+            echo "release_tag=ci-$short_sha" >> "$GITHUB_OUTPUT"
+            echo "title=Orange-NG CI Build $short_sha" >> "$GITHUB_OUTPUT"
+            echo "is_custom_tag=false" >> "$GITHUB_OUTPUT"
+            echo "Using auto-generated CI tag: ci-$short_sha"
+          fi
 
-      - name: Delete existing draft release for this commit (if any, so a rerun doesn't leave stale assets)
+      - name: Delete existing draft release for this tag (if any, so a rerun doesn't leave stale assets)
         # Delete the draft release WITHOUT --cleanup-tag so the real git tag (pushed by a
         # previous run) survives. The tag is needed by the NEXT run's git-cliff so it can
         # compare against the previous release. If we used --cleanup-tag, the tag would be
@@ -237,37 +267,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-          if gh release view "${{ steps.meta.outputs.ci_tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Existing release found for tag ${{ steps.meta.outputs.ci_tag }}; deleting and recreating to ensure asset freshness (tag preserved)."
-            gh release delete "${{ steps.meta.outputs.ci_tag }}" --repo "$GITHUB_REPOSITORY" --yes
+          if gh release view "${{ steps.meta.outputs.release_tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Existing release found for tag ${{ steps.meta.outputs.release_tag }}; deleting and recreating to ensure asset freshness (tag preserved)."
+            gh release delete "${{ steps.meta.outputs.release_tag }}" --repo "$GITHUB_REPOSITORY" --yes
           else
-            echo "No existing release for tag ${{ steps.meta.outputs.ci_tag }}; creating fresh."
+            echo "No existing release for tag ${{ steps.meta.outputs.release_tag }}; creating fresh."
           fi
 
       - name: Create local tag at HEAD for git-cliff
         # Create a lightweight local tag at HEAD so git-cliff's --latest flag treats HEAD
         # as the newest tagged release and emits the commits between the previous tag
         # (fetched from the remote by the checkout step) and HEAD. Use git tag -f so a
-        # rerun of the same commit (which already has a local tag from a previous step
+        # rerun of the same commit/tag (which already has a local tag from a previous step
         # attempt) does not fail.
         run: |
-          git tag -f "${{ steps.meta.outputs.ci_tag }}" HEAD
-          echo "Created local tag ${{ steps.meta.outputs.ci_tag }} at HEAD for git-cliff."
+          git tag -f "${{ steps.meta.outputs.release_tag }}" HEAD
+          echo "Created local tag ${{ steps.meta.outputs.release_tag }} at HEAD for git-cliff."
 
       - name: Generate changelog with git-cliff
         # Uses orhun/git-cliff-action@v4 to generate the release notes from the
         # commit history. The cliff.toml config in the repo root enables:
         #   - conventional-commit grouping (Features / Bug Fixes / Refactor / etc.)
         #   - GitHub integration (PR links, contributor credits, "Full Changelog"
-        #     compare link between the previous tag and the new ci-<short-sha> tag)
+        #     compare link between the previous tag and the new release tag)
         # --latest --strip header emits only the section for the latest tag
-        # (ci-<short-sha>), without the global "# Changelog" header.
+        # (the release tag), without the global "# Changelog" header.
         #
-        # On the first CI run there are no previous ci-* tags on the remote, so
-        # git-cliff emits all commits from the beginning of history. On subsequent
-        # runs, the previous ci-* tag (pushed by the "Push tag to remote" step
-        # below) is fetched by the checkout, and git-cliff emits only the commits
-        # between that previous tag and HEAD.
+        # git-cliff picks the locally-created tag as the latest, finds the previous tag
+        # reachable from HEAD (e.g. v1.1.0, a previous ci-* tag, or a previous custom
+        # release tag), and emits only the commits between them.
         id: git_cliff
         uses: orhun/git-cliff-action@v4
         with:
@@ -287,14 +315,14 @@ jobs:
         # git tag to the remote — the tag exists only as metadata on the release
         # object and is materialized as a git ref only when the release is
         # published. This means the next CI run's checkout cannot fetch the
-        # previous ci-* tag, and git-cliff cannot find a previous release to
-        # compare against.
+        # previous tag, and git-cliff cannot find a previous release to compare
+        # against.
         #
-        # To fix this, we push the ci-<short-sha> tag as a real lightweight git
-        # tag to the remote. The push is idempotent: if the tag already exists at
-        # the same commit (e.g. from a previous run of the same commit), git says
-        # "Everything up-to-date" and exits 0. The tag persists across runs so
-        # git-cliff can always find the previous release baseline.
+        # To fix this, we push the release tag as a real lightweight git tag to
+        # the remote. The push is idempotent: if the tag already exists at the
+        # same commit, git says "Everything up-to-date" and exits 0. If the tag
+        # exists at a different commit (e.g. re-dispatching with the same custom
+        # tag on a new commit), we force-push to move it.
         #
         # We push BEFORE creating the draft release so that `gh release create`
         # can associate the release with the already-existing tag rather than
@@ -305,14 +333,12 @@ jobs:
         # http.<url>.extraheader, so `git push` authenticates automatically without
         # the token appearing in the command line, the push output, or shell history.
         run: |
-          if git push origin "${{ steps.meta.outputs.ci_tag }}" 2>&1; then
-            echo "Tag ${{ steps.meta.outputs.ci_tag }} pushed to remote (or already up-to-date)."
+          if git push origin "${{ steps.meta.outputs.release_tag }}" 2>&1; then
+            echo "Tag ${{ steps.meta.outputs.release_tag }} pushed to remote (or already up-to-date)."
           else
-            # If the push fails because the tag already exists at a different commit
-            # (shouldn't happen since ci-<short-sha> is deterministic per commit), force-push.
-            echo "Tag push failed; retrying with --force..."
-            git push --force origin "${{ steps.meta.outputs.ci_tag }}"
-            echo "Tag ${{ steps.meta.outputs.ci_tag }} force-pushed to remote."
+            echo "Tag push failed; retrying with --force (tag may exist at a different commit)..."
+            git push --force origin "${{ steps.meta.outputs.release_tag }}"
+            echo "Tag ${{ steps.meta.outputs.release_tag }} force-pushed to remote."
           fi
 
       - name: Build release notes (build metadata + git-cliff changelog)
@@ -320,8 +346,17 @@ jobs:
         run: |
           branch=${GITHUB_REF#refs/heads/}
           build_date=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          # Pick the disclaimer based on whether this is a custom-tagged release
+          # (e.g. v1.3.0) or an auto-generated CI build (ci-<short-sha>).
+          if [ "${{ steps.meta.outputs.is_custom_tag }}" = "true" ]; then
+            header="## ${{ steps.meta.outputs.title }}"
+            disclaimer="> This is a draft release prepared by CI from the \`$branch\` branch. Review the changelog and assets, then publish the release when ready. The signing identity is temporary and may be replaced later (which would require uninstalling any previously installed build before upgrading)."
+          else
+            header="## Orange-NG CI Build"
+            disclaimer="> This is an automated CI build from the \`$branch\` branch. It is not a stable release. The signing identity is temporary and may be replaced later (which would require uninstalling any previously installed CI build before upgrading)."
+          fi
           {
-            echo "## Orange-NG CI Build"
+            echo "$header"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -353,7 +388,7 @@ jobs:
             echo ""
             echo "---"
             echo ""
-            echo "> This is an automated CI build from the \`feat/npatch-libxposed-102\` branch. It is not a stable release. The signing identity is temporary and may be replaced later (which would require uninstalling any previously installed CI build before upgrading)."
+            echo "$disclaimer"
           } > "$RUNNER_TEMP/release-notes.md"
           echo "Release notes written to $RUNNER_TEMP/release-notes.md"
           echo "--- First 30 lines ---"
@@ -363,7 +398,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.meta.outputs.ci_tag }}" \
+          gh release create "${{ steps.meta.outputs.release_tag }}" \
             --repo "$GITHUB_REPOSITORY" \
             --target feat/npatch-libxposed-102 \
             --title "${{ steps.meta.outputs.title }}" \
@@ -376,4 +411,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "${{ steps.meta.outputs.ci_tag }}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name) (\(.size) bytes)"'
+          gh release view "${{ steps.meta.outputs.release_tag }}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name) (\(.size) bytes)"'
