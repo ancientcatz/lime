@@ -273,3 +273,159 @@ thanks to the concurrent debug+release build + Gradle parallel mode.
   (no previous tag to compare against). The NEXT run should show only the new commit plus
   the "Full Changelog: ci-0890d730063a...ci-<new>" compare link.
 
+
+---
+
+## Run 40452258014
+
+- **Commit**: `1f58bc6d22048521715bcde9416f2b029b9d0615` (`1f58bc6`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T04:53:57Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40452258014
+
+### What this run introduced
+- Integrated `orhun/git-cliff-action@v4` into the release job.
+- Added `cliff.toml` config combining the GitHub template (PR links, contributor credits,
+  "Full Changelog" compare link) with conventional-commit grouping.
+- The release job's checkout was changed to `fetch-depth: 0` (required by git-cliff).
+- A "Create temporary local tag at HEAD" step was added so git-cliff's `--latest` flag
+  treats HEAD as a tagged release.
+- The "Build release notes" step now combines the build metadata table with the
+  git-cliff-generated changelog under a "## Changelog" heading.
+
+### Issue found
+- The changelog showed ALL commits from the beginning of history instead of just the
+  commits since the previous release. Root cause: `actions/checkout`'s default
+  `fetch-tags: false` passed `--no-tags` to `git fetch`, preventing the upstream `v*`
+  tags from being created as local refs.
+
+### Draft release
+- Tag: `ci-1f58bc6d2204`
+- Assets: both APKs attached.
+
+---
+
+## Run 40452538254
+
+- **Commit**: `8c4b6be25dca596429e41e8533079145bb61ee8f` (`8c4b6be`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T04:57:02Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40452538254
+
+### What this run introduced
+- Added `fetch-tags: true` to the release job's checkout step so the upstream `v*` tags
+  and any previous `ci-*` tags are fetched.
+
+### Issue found
+- The changelog STILL showed all commits from the beginning of history. Root cause:
+  draft releases created by `gh release create --draft` do NOT push a real git tag to
+  the remote — the tag exists only as metadata on the release object. So each CI run's
+  checkout could not fetch the previous `ci-*` tag, and git-cliff could not find a
+  previous release to compare against. Verified via `gh api repos/.../tags` returning
+  empty and `gh api repos/.../git/refs/tags/ci-*` returning 404.
+
+### Draft release
+- Tag: `ci-8c4b6be25dca`
+- Assets: both APKs attached.
+
+---
+
+## Run 40452941884
+
+- **Commit**: `0890d730063a27bf3158ad155c968dfe1d9f6d6c` (`0890d73`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T05:01:19Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40452941884
+
+### What this run introduced
+- Added a "Push tag to remote" step that explicitly pushes `ci-<short-sha>` as a real
+  lightweight git tag to the remote BEFORE creating the draft release.
+- Removed `--cleanup-tag` from the release deletion step so the real git tag survives
+  release deletion.
+- Used `git tag -f` (force) when creating the local tag so a rerun of the same commit
+  does not fail.
+- Removed the separate "Clean up the temporary local tag" step (the runner is ephemeral).
+
+### What this run verified
+- The "Push tag to remote" step successfully pushed `ci-0890d730063a` as a real git ref.
+- Verified via `gh api repos/ancientcatz/Orange-NG/tags` that the tag now exists on the
+  remote.
+- This is the first run that pushes a real tag, so the changelog still shows all commits
+  (no previous tag to compare against). The NEXT run should show only the new commit plus
+  the "Full Changelog: ci-0890d730063a...ci-<new>" compare link.
+
+### Draft release
+- Tag: `ci-0890d730063a`
+- Assets: both APKs attached.
+
+---
+
+## Run 40453225389
+
+- **Commit**: `6134b6b3b97988966abea4a15b4632d7ef919d68` (`6134b6b`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T05:04:22Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40453225389
+
+### What this run verified
+- **The git-cliff integration is now fully working.** The changelog shows ONLY the 3
+  commits since the previous tag (`ci-0890d73...ci-6134b6b`), NOT all commits from the
+  beginning of history.
+- The "Full Changelog" compare link is present:
+  `https://github.com/ancientcatz/Orange-NG/compare/ci-0890d730063a...ci-6134b6b3b979`
+- Conventional-commit grouping works correctly:
+  - The `ci:` commit is under "Miscellaneous Tasks".
+  - The `docs:` commit is under "Documentation".
+  - The `Revert` commit is under "Other".
+- Contributor credits work: `by @ancientcatz` appears next to each commit.
+- Two real git tags now exist on the remote: `ci-0890d730063a` and `ci-6134b6b3b979`.
+
+### Draft release
+- Tag: `ci-6134b6b3b979`
+- Assets: both APKs attached.
+- Changelog section (generated by git-cliff):
+  ```
+  ## What's Changed in ci-6134b6b3b979
+
+  ### Documentation
+  * verify git-cliff compares against previous ci-* tag by @ancientcatz
+
+  ### Miscellaneous Tasks
+  * verify git-cliff compares against previous ci-* tag by @ancientcatz
+
+  ### Other
+  * Revert "docs: verify git-cliff compares against previous ci-* tag" by @ancientcatz
+
+  **Full Changelog**: https://github.com/ancientcatz/Orange-NG/compare/ci-0890d730063a...ci-6134b6b3b979
+  ```
+
+---
+
+## Summary (updated)
+
+| Run ID | Commit | Conclusion | Duration | Draft release | Notes |
+|--------|--------|------------|----------|---------------|-------|
+| 40447899202 | 8398753 | failure | 19s | — | setup-android action broke |
+| 40448028674 | a194cc4 | failure | 23s | — | wrong SDK package name |
+| 40448182748 | 2871a2f | failure | 1m1s | — | secret env var mismatch |
+| 40448483874 | e1d0c2a | success | 4m33s | ci-e1d0c2ad6bef | first green build |
+| 40449028782 | 8084597 | success | 3m8s | ci-80845972943c | action upgrades |
+| 40450657195 | 3ceeb1c | success | 2m7s | ci-3ceeb1c5337a | MenuProvider + concurrent build |
+| 40452258014 | 1f58bc6 | success | 1m27s | ci-1f58bc6d2204 | git-cliff integrated (all commits) |
+| 40452538254 | 8c4b6be | success | 1m31s | ci-8c4b6be25dca | fetch-tags: true (still all commits) |
+| 40452941884 | 0890d73 | success | 1m34s | ci-0890d730063a | push real tag (still all commits) |
+| 40453225389 | 6134b6b | success | 1m20s | ci-6134b6b3b979 | **git-cliff fully working** |
+
+The final successful run (40453225389) corresponds to commit 6134b6b. Its draft release
+contains a git-cliff-generated changelog that shows only the 3 commits since the previous
+tag, with conventional-commit grouping, PR links, contributor credits, and a "Full Changelog"
+compare link. Each future CI run will push its own ci-<short-sha> tag, creating a chain of
+comparison baselines.
