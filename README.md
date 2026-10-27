@@ -79,5 +79,3 @@ draft GitHub Release tagged `ci-<short-sha>` so each commit has its own testable
 ## License
 
 GNU General Public License v3. See [LICENSE](LICENSE).
-
-<!-- Trigger: verify git-cliff compares against the previous ci-* tag -->
