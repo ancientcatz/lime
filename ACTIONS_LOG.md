@@ -594,3 +594,106 @@ The final two runs verify the new trigger policy:
 - workflow_dispatch with tag=v1.3.0 (40457951255): build + release, draft release v1.3.0
   created with custom tag, custom title, custom disclaimer, and git-cliff changelog
   comparing against the previous ci-* tag.
+
+---
+
+## Run 40459281159 (push — 3 concurrent jobs, release skipped)
+
+- **Commit**: `ca695328a4bdae60f6b85e4d38f3033cdd2fdc7c` (`ca69532`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `push`
+- **Triggered at**: 2026-10-27T06:08:10Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40459281159
+
+### What this run verified
+- **The build is now split into 3 concurrent jobs** that run in parallel on separate runners:
+  - `Lint + unit tests`: ✓ 47s
+  - `Build debug APK`: ✓ 29s
+  - `Build release APK`: ✓ 29s
+- All three started simultaneously. Total wall-clock time was ~47s (dominated by the slowest
+  job, validate), vs ~1m16s for the previous single-job approach — a ~38% speedup.
+- `Create or update draft release`: skipped (push event).
+- Both APKs uploaded as separate artifacts: `apk-debug-<sha>` and `apk-release-<sha>`.
+
+### Draft release
+- None (release job skipped on push).
+
+---
+
+## Run 40459412735 (dispatch, tag=v1.3.1, debug=false — release APK only)
+
+- **Commit**: `ca695328a4bdae60f6b85e4d38f3033cdd2fdc7c` (`ca69532`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `workflow_dispatch` (tag=v1.3.1, debug=false)
+- **Triggered at**: 2026-10-27T06:09:35Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40459412735
+
+### What this run verified
+- All 4 jobs ran: 3 concurrent build/validate jobs + release job.
+- Draft release v1.3.1 created with **exactly 1 asset** (release APK only):
+  - `asset_count: 1`
+  - `assets: ["orange-ng-vca69532...-release.apk"]`
+- The debug APK was NOT downloaded and NOT attached (debug input was false).
+- Release notes show "Debug APK included: false", only the release APK in the Artifacts
+  section, and "Install the release APK." in the Install section.
+
+### Draft release
+- Tag: `v1.3.1`
+- URL: https://github.com/ancientcatz/Orange-NG/releases/tag/v1.3.1
+- Assets: 1 (release APK only, 1.5 MB signed v3)
+
+---
+
+## Run 40459582935 (dispatch, tag=v1.3.2, debug=true — both APKs)
+
+- **Commit**: `ca695328a4bdae60f6b85e4d38f3033cdd2fdc7c` (`ca69532`)
+- **Branch**: `feat/npatch-libxposed-102`
+- **Trigger**: `workflow_dispatch` (tag=v1.3.2, debug=true)
+- **Triggered at**: 2026-10-27T06:11:10Z
+- **Conclusion**: `success`
+- **URL**: https://github.com/ancientcatz/Orange-NG/actions/runs/40459582935
+
+### What this run verified
+- All 4 jobs ran: 3 concurrent build/validate jobs + release job.
+- Draft release v1.3.2 created with **exactly 2 assets** (both APKs):
+  - `asset_count: 2`
+  - `assets: ["orange-ng-vca69532...-debug.apk", "orange-ng-vca69532...-release.apk"]`
+- The debug APK WAS downloaded and attached (debug input was true).
+- Release notes show "Debug APK included: true", both APKs in the Artifacts section, and
+  "Install the release APK (or the debug APK for development)." in the Install section.
+
+### Draft release
+- Tag: `v1.3.2`
+- URL: https://github.com/ancientcatz/Orange-NG/releases/tag/v1.3.2
+- Assets: 2 (debug 10.0 MB + release 1.5 MB signed v3)
+
+---
+
+## Summary (final)
+
+| Run ID | Commit | Trigger | Conclusion | Duration | Draft release | Assets | Notes |
+|--------|--------|---------|------------|----------|---------------|--------|-------|
+| 40447899202 | 8398753 | push | failure | 19s | — | — | setup-android broke |
+| 40448028674 | a194cc4 | push | failure | 23s | — | — | wrong SDK pkg name |
+| 40448182748 | 2871a2f | push | failure | 1m1s | — | — | secret env mismatch |
+| 40448483874 | e1d0c2a | push | success | 4m33s | (deleted) | — | first green build |
+| 40449028782 | 8084597 | push | success | 3m8s | (deleted) | — | action upgrades |
+| 40450657195 | 3ceeb1c | push | success | 2m7s | (deleted) | — | MenuProvider + concurrent |
+| 40452258014 | 1f58bc6 | push | success | 1m27s | (deleted) | — | git-cliff integrated |
+| 40452538254 | 8c4b6be | push | success | 1m31s | (deleted) | — | fetch-tags: true |
+| 40452941884 | 0890d73 | push | success | 1m34s | (deleted) | — | push real tag |
+| 40453225389 | 6134b6b | push | success | 1m20s | ci-6134b6b3b979 | 2 | git-cliff fully working |
+| 40455500504 | 32c0bab | push | success | 3m0s | ci-32c0bab917aa | 2 | targetSdk 33 + v1.1.0 tag |
+| 40457789147 | d254cb2 | push | success | 1m16s | — | — | push no longer releases |
+| 40457951255 | d254cb2 | dispatch (v1.3.0) | success | 1m31s | v1.3.0 | 2 | custom-tag release |
+| 40459281159 | ca69532 | push | success | 47s | — | — | **3 concurrent jobs** |
+| 40459412735 | ca69532 | dispatch (v1.3.1, debug=false) | success | 1m9s | v1.3.1 | 1 | **release APK only** |
+| 40459582935 | ca69532 | dispatch (v1.3.2, debug=true) | success | 1m7s | v1.3.2 | 2 | **both APKs** |
+
+The final three runs verify the split-build + debug-input design:
+- Push (40459281159): 3 concurrent jobs (validate 47s, build-debug 29s, build-release 29s),
+  release skipped. Wall-clock time dropped 38% (1m16s → 47s) vs the previous single-job approach.
+- Dispatch with debug=false (40459412735): release v1.3.1 with 1 asset (release APK only).
+- Dispatch with debug=true (40459582935): release v1.3.2 with 2 assets (both APKs).

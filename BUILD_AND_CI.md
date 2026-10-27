@@ -278,3 +278,52 @@ The concurrency group now includes `github.event_name`:
 in-flight `workflow_dispatch` release (and vice versa) — they run independently. Multiple
 pushes in quick succession still cancel each other (good — saves runner minutes), and
 multiple dispatches in quick succession cancel each other too.
+
+## Split build into concurrent jobs (commit ca69532)
+
+Per user request, the monolithic `build` job was split into three concurrent jobs that run
+in parallel on separate runners, mimicking the approach used for separate ABI builds:
+
+| Job | Purpose | Signing | Runs on | Artifact |
+|-----|---------|---------|---------|----------|
+| `validate` | lint + unit tests | No | All events | — |
+| `build-debug` | assemble debug APK | No (debug keystore) | All events | `apk-debug-<sha>` |
+| `build-release` | assemble release APK | Yes (on push/dispatch) | All events | `apk-release-<sha>` |
+| `release` | create draft release | — | workflow_dispatch only | — |
+
+`validate`, `build-debug`, and `build-release` have no `needs` dependency, so they start
+simultaneously and run on separate runners — true parallelism. The `release` job
+`needs: [validate, build-debug, build-release]`, so it waits for all three to succeed
+before downloading the artifacts and creating the release. If any of the three fails, the
+release is skipped (default `needs` behavior).
+
+**Speed improvement**: push wall-clock time dropped from ~1m16s (single-job with `--parallel`)
+to ~47s (3 concurrent jobs) — a 38% speedup. The debug build (fast, no R8) and the release
+build (slow, R8 + resource shrinking) no longer compete for the same runner's resources.
+
+## `debug` input (commit ca69532)
+
+`workflow_dispatch` now accepts a second optional input:
+
+| Input | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `tag` | string | `""` | Tag name for the release. Empty = ci-<short-sha>. Custom = versioned release. |
+| `debug` | boolean | `false` | When `true`, the debug APK is also attached to the release. When `false` (default), only the release APK is published. |
+
+When `debug = false` (default):
+- The release job downloads only `apk-release-<sha>`.
+- The `gh release create` command attaches only the release APK.
+- The release notes list only the release APK in the Artifacts section.
+- The Install instructions say "Install the release APK."
+
+When `debug = true`:
+- The release job downloads both `apk-release-<sha>` and `apk-debug-<sha>`.
+- The `gh release create` command attaches both APKs.
+- The release notes list both APKs in the Artifacts section.
+- The Install instructions say "Install the release APK (or the debug APK for development)."
+- The metadata table includes a "Debug APK included: true" row.
+
+The `debug` input lets the user control whether the debug APK is published. By default,
+only the release APK is published (debug APKs are for development, not distribution). When
+the user wants to also distribute the debug APK (e.g. for testers who need a debuggable
+build), they enable `debug` on the dispatch.
