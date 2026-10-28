@@ -8,8 +8,6 @@ import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.SearchView
 import androidx.core.view.MenuProvider
-import androidx.core.view.isVisible
-import androidx.core.widget.ContentLoadingProgressBar
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -41,7 +39,6 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
         // onDestroyOptionsMenu.
         requireActivity().addMenuProvider(menuProvider, viewLifecycleOwner, Lifecycle.State.RESUMED)
         val appListView = view.findViewById<RecordScrollRecyclerView>(R.id.app_list)
-        val progressBarView = view.findViewById<ContentLoadingProgressBar>(R.id.progress_bar)
         val appListAdapter = AppListAdapter()
         appListAdapter.eventListener = this
         appListView.apply {
@@ -54,33 +51,25 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
             // ensure existing item views are reused rather than rebound when new items
             // trickle in during progressive icon loading.
             //
+            // The RecyclerView is always visible (no loading screen). Apps appear
+            // progressively as their icons finish loading.
+            //
             // NOTE: Do NOT call scrollToLastPosition() here. During progressive icon loading
             // the list updates frequently (every ~120ms), and restoring the scroll position
             // on each update would fight with the user's active scrolling, causing glitches.
             // The RecyclerView preserves scroll position across adapter updates automatically
-            // (thanks to stable IDs). The scroll position is restored once, when loading
-            // completes, in the isLoading observer below.
+            // (thanks to stable IDs). The scroll position is restored once, the first time
+            // the list receives data (see the hasRestoredScroll guard below).
             appListAdapter.submitList(it)
-        }
-        mainViewModel.isLoadingLiveData.observe(viewLifecycleOwner) { isLoading ->
-            if (isLoading) {
-                // Enumeration phase: show the spinner, hide the (empty) list.
-                appListView.isVisible = false
-                progressBarView.show()
-            } else {
-                // Enumeration done. Show the list immediately — it may still be empty
-                // (no icons loaded yet) but icons will trickle in progressively via
-                // appListLiveData updates. No artificial delay: the user sees the list
-                // become visible and fill in as fast as icons can load.
-                progressBarView.hide()
-                appListView.isVisible = true
-                // Restore the saved scroll position once, when the list first becomes
-                // visible. This preserves the user's position across activity recreation
-                // without disrupting scrolling during incremental icon loading.
+            if (!hasRestoredScroll && it.isNotEmpty()) {
+                hasRestoredScroll = true
                 appListView.scrollToLastPosition()
             }
         }
     }
+
+    /** Tracks whether the saved scroll position has been restored yet. */
+    private var hasRestoredScroll = false
 
     override fun onStart() {
         super.onStart()
@@ -144,6 +133,7 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
         override fun onMenuItemSelected(item: MenuItem): Boolean {
             return when (item.itemId) {
                 R.id.refresh -> {
+                    hasRestoredScroll = false
                     mainViewModel.loadAppList(true)
                     true
                 }

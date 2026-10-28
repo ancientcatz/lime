@@ -109,23 +109,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     private val listLock = Any()
 
     private val appListLiveDataInternal = MutableLiveData<List<AppListItem>>()
-    private val isLoadingLiveDataInternal = MutableLiveData<Boolean>()
     private var hasLoadedAppList = false
 
     /**
-     * Total number of enumerated apps (set at the end of Phase 1). Used to compute the 10%
-     * icon-rendered threshold at which the loading screen is dismissed.
+     * Whether a load is currently in progress. Used to guard against concurrent loads
+     * (without a loading screen, there is no LiveData for this — just an internal flag).
      */
     @Volatile
-    private var totalAppCount: Int = 0
-
-    /**
-     * Whether the loading screen has been dismissed yet. Set to true once 10% of icons have
-     * rendered (or immediately if there are fewer than 10 apps). Prevents repeated
-     * isLoading=false posts.
-     */
-    @Volatile
-    private var loadingDismissed: Boolean = false
+    private var isLoading = false
 
     /**
      * The current icon-loading job. Cancelled when a new load starts (force reload) so that
@@ -175,7 +166,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     private var publishJob: Job? = null
 
     val appListLiveData: LiveData<List<AppListItem>> = appListLiveDataInternal
-    val isLoadingLiveData: LiveData<Boolean> = isLoadingLiveDataInternal
 
     @Volatile
     var queryText = ""
@@ -209,13 +199,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
      * Calling with [forceReload] = true cancels any in-flight load and starts fresh.
      */
     fun loadAppList(forceReload: Boolean = false) {
-        if (isLoadingLiveDataInternal.value == true || (hasLoadedAppList && !forceReload)) {
+        if (isLoading || (hasLoadedAppList && !forceReload)) {
             return
         }
         loadJob?.cancel()
-        isLoadingLiveDataInternal.value = true
-        loadingDismissed = false
-        totalAppCount = 0
+        isLoading = true
         val benchmark = LoadBenchmark().also { currentBenchmark = it }
         loadJob = viewModelScope.launch(Dispatchers.Default) {
             try {
@@ -254,7 +242,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
                 synchronized(listLock) {
                     appList.addAll(enumerated)
                 }
-                totalAppCount = enumerated.size
 
                 // Populate the pending queue in sort order (appList is already sorted).
                 for (i in enumerated.indices) {
@@ -263,34 +250,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
 
                 benchmark.onEnumerationDone(enumerated.size)
                 hasLoadedAppList = true
-
-                // If there are no apps at all, dismiss the loading screen immediately.
-                // Otherwise, the loading screen stays visible until 10% of icons have
-                // rendered (see onIconReady).
-                if (enumerated.isEmpty()) {
-                    dismissLoading()
-                }
+                isLoading = false
 
                 // ── Phase 2: load icons concurrently in priority order ──────────────────
                 loadIcons()
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to load app list", t)
-                isLoadingLiveDataInternal.postValue(false)
+                isLoading = false
             }
         }
-    }
-
-    /**
-     * Dismisses the loading screen by posting isLoading=false. Idempotent: once dismissed,
-     * subsequent calls are no-ops. Called either when the app list is empty (no icons to
-     * load) or when 10% of icons have rendered (see [onIconReady]).
-     */
-    private fun dismissLoading() {
-        if (loadingDismissed) return
-        loadingDismissed = true
-        val readyCount = synchronized(listLock) { readyList.size }
-        currentBenchmark?.onLoadingDismissed(readyCount)
-        isLoadingLiveDataInternal.postValue(false)
     }
 
     /**
@@ -350,14 +318,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
             readyCount = readyList.size
         }
         currentBenchmark?.onIconReady(readyCount)
-        // Dismiss the loading screen once 10% of icons have rendered (at least 1).
-        // This ensures the user sees a populated list (not an empty RecyclerView) when
-        // the loading spinner disappears. The remaining 90% of icons continue loading
-        // in the background and trickle in progressively.
-        val threshold = (totalAppCount * 10 / 100).coerceAtLeast(1)
-        if (readyCount >= threshold) {
-            dismissLoading()
-        }
         schedulePublish()
     }
 
@@ -467,7 +427,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         private var totalApps: Int = 0
         private var enumerationDoneMs: Long = -1
         private var firstIconMs: Long = -1
-        private var loadingDismissedMs: Long = -1
         private var usefulPortionMs: Long = -1
         private var allIconsDoneMs: Long = -1
 
@@ -489,19 +448,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
             }
         }
 
-        fun onLoadingDismissed(readyCount: Int) {
-            loadingDismissedMs = elapsedMs()
-            val pct = if (totalApps > 0) readyCount * 100 / totalApps else 100
-            Log.i(TAG, "benchmark: loading dismissed at ${loadingDismissedMs}ms ($readyCount/$totalApps icons, $pct%)")
-        }
-
         fun onAllIconsDone() {
             allIconsDoneMs = elapsedMs()
             Log.i(TAG, "benchmark: all icons done at ${allIconsDoneMs}ms ($totalApps apps)")
             Log.i(TAG, "benchmark summary: enumeration=${enumerationDoneMs}ms, " +
-                    "firstIcon=${firstIconMs}ms, loadingDismissed=${loadingDismissedMs}ms, " +
-                    "usefulPortion=${usefulPortionMs}ms, allDone=${allIconsDoneMs}ms, " +
-                    "totalApps=$totalApps")
+                    "firstIcon=${firstIconMs}ms, usefulPortion=${usefulPortionMs}ms, " +
+                    "allDone=${allIconsDoneMs}ms, totalApps=$totalApps")
         }
 
         private fun elapsedMs(): Long = (System.nanoTime() - startNanos) / 1_000_000
