@@ -3,6 +3,7 @@
     <string name="label_module_not_active">未激活</string>
     <string name="title_menu_search">搜索</string>
     <string name="title_menu_refresh">刷新</string>
+    <string name="title_menu_launchable_only">仅显示可启动应用</string>
     <string name="title_menu_settings">设置</string>
     <string name="title_menu_exit">退出</string>
     <string name="label_orientation_options_unspecified">未指定</string>

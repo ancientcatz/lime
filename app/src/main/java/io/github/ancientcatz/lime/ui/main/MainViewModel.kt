@@ -81,6 +81,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     private val showSystemApps get() = prefs.getBoolean(keyshowSystemApps, false)
 
     /**
+     * When true (default), only apps with a launcher activity are shown. When false, all
+     * installed apps (subject to the show-system-apps filter) are shown. Toggled from the
+     * MainFragment's "Launchable apps only" checkbox.
+     */
+    @Volatile
+    var launchableOnly: Boolean = true
+
+    /**
      * The full list of enumerated apps with their labels and orientations, but WITHOUT icons
      * (icon == null). Sorted by [readyListComparator]. Populated during Phase 1 and used as
      * the source of truth for icon loading and for the current orientation state.
@@ -216,10 +224,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
                 schedulePublish()
 
                 val packageManager = getApplication<Application>().packageManager
+                val launchable = launchableOnly
                 val enumerated = packageManager.getInstalledApplications(0)
                     .filter {
-                        showSystemApps || (it.flags and ApplicationInfo.FLAG_SYSTEM == 0 &&
-                                it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP == 0)
+                        (showSystemApps || (it.flags and ApplicationInfo.FLAG_SYSTEM == 0 &&
+                                it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP == 0)) &&
+                                (!launchable || packageManager.getLaunchIntentForPackage(it.packageName) != null)
                     }
                     .map { appInfo ->
                         val configApp = sharedConfig.findConfigApp(appInfo.packageName)

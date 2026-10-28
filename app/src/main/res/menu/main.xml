@@ -12,6 +12,11 @@
         android:id="@+id/refresh"
         android:title="@string/title_menu_refresh" />
     <item
+        android:id="@+id/launchable_only"
+        android:title="@string/title_menu_launchable_only"
+        android:checkable="true"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/setting"
         android:title="@string/title_menu_settings" />
     <item

@@ -128,11 +128,21 @@ class MainFragment : Fragment(R.layout.fragment_main), App.ServiceStateListener,
                     return false
                 }
             })
+            // Initialize the "Launchable apps only" checkbox from the view model's state.
+            menu.findItem(R.id.launchable_only).isChecked = mainViewModel.launchableOnly
         }
 
         override fun onMenuItemSelected(item: MenuItem): Boolean {
             return when (item.itemId) {
                 R.id.refresh -> {
+                    hasRestoredScroll = false
+                    mainViewModel.loadAppList(true)
+                    true
+                }
+                R.id.launchable_only -> {
+                    // Toggle the checkbox and the view model's filter, then reload.
+                    item.isChecked = !item.isChecked
+                    mainViewModel.launchableOnly = item.isChecked
                     hasRestoredScroll = false
                     mainViewModel.loadAppList(true)
                     true
