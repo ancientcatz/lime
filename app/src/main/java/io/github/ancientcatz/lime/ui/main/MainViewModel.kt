@@ -117,14 +117,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     private val listLock = Any()
 
     private val appListLiveDataInternal = MutableLiveData<List<AppListItem>>()
+    private val isLoadingLiveDataInternal = MutableLiveData<Boolean>()
     private var hasLoadedAppList = false
 
     /**
-     * Whether a load is currently in progress. Used to guard against concurrent loads
-     * (without a loading screen, there is no LiveData for this — just an internal flag).
+     * Whether a load is currently in progress. Used to guard against concurrent loads.
      */
     @Volatile
     private var isLoading = false
+
+    /**
+     * Whether the loading screen has been dismissed yet for the current load. Set to true
+     * as soon as the first app icon is rendered (so the list becomes visible without
+     * unnecessary delay). Prevents repeated isLoading=false posts.
+     */
+    @Volatile
+    private var loadingDismissed: Boolean = false
 
     /**
      * The current icon-loading job. Cancelled when a new load starts (force reload) so that
@@ -174,6 +182,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
     private var publishJob: Job? = null
 
     val appListLiveData: LiveData<List<AppListItem>> = appListLiveDataInternal
+    val isLoadingLiveData: LiveData<Boolean> = isLoadingLiveDataInternal
 
     @Volatile
     var queryText = ""
@@ -212,6 +221,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         }
         loadJob?.cancel()
         isLoading = true
+        loadingDismissed = false
+        isLoadingLiveDataInternal.value = true
         val benchmark = LoadBenchmark().also { currentBenchmark = it }
         loadJob = viewModelScope.launch(Dispatchers.Default) {
             try {
@@ -260,15 +271,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
 
                 benchmark.onEnumerationDone(enumerated.size)
                 hasLoadedAppList = true
-                isLoading = false
+
+                // If there are no apps at all, dismiss the loading screen immediately
+                // (no icons will ever render). Otherwise, the loading screen is dismissed
+                // as soon as the first icon is ready (see onIconReady).
+                if (enumerated.isEmpty()) {
+                    dismissLoading()
+                }
 
                 // ── Phase 2: load icons concurrently in priority order ──────────────────
                 loadIcons()
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to load app list", t)
                 isLoading = false
+                isLoadingLiveDataInternal.postValue(false)
             }
         }
+    }
+
+    /**
+     * Dismisses the loading screen by posting isLoading=false. Idempotent: once dismissed,
+     * subsequent calls are no-ops. Called either when the app list is empty (no icons to
+     * load) or as soon as the first app icon is rendered (see [onIconReady]).
+     */
+    private fun dismissLoading() {
+        if (loadingDismissed) return
+        loadingDismissed = true
+        isLoadingLiveDataInternal.postValue(false)
     }
 
     /**
@@ -306,6 +335,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
         iconJobs.forEach { it.join() }
         // Final publish (immediate, not throttled) to ensure the complete list is shown.
         publishNow()
+        isLoading = false
         currentBenchmark?.onAllIconsDone()
     }
 
@@ -328,6 +358,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app),
             readyCount = readyList.size
         }
         currentBenchmark?.onIconReady(readyCount)
+        // Dismiss the loading screen as soon as the first icon is rendered so the list
+        // becomes visible without unnecessary delay. Remaining icons continue loading
+        // in the background and trickle in progressively.
+        if (readyCount == 1) {
+            dismissLoading()
+        }
         schedulePublish()
     }
 
