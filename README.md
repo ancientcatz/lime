@@ -1,23 +1,23 @@
 # Lime
 
-Lime is an [Xposed](https://github.com/libxposed/api) module that pins screen orientation on a
-per-app basis. Useful for apps that need a forced orientation to give the best experience (e.g.
-forcing a game into landscape).
+An [Xposed](https://github.com/libxposed/api) module that pins screen orientation per app.
 
-Built against the modern libxposed API 102.
+If a game or emulator only supports portrait but you want it in landscape, Lime forces it.
+Configure orientation for any installed app from the in-app list.
 
-## Target platform
+## Requirements
 
-| Platform      | Version                          |
-|:--------------|:---------------------------------|
-| Android       | minSdk 30 / targetSdk 33 (13+)   |
-| libxposed API | 102 (`minApiVersion=101`)        |
+- Android 13+ (API 33)
+- An Xposed framework compatible with libxposed API 102 (NPatch, LSPosed)
 
-## Module scope
+## Install
 
-The module ships with an empty `META-INF/xposed/scope.list`. Configure the target apps in
-NPatch's module settings (one package per line).
+See [INSTALL.md](INSTALL.md).
+
+## Build
+
+See [BUILD.md](BUILD.md).
 
 ## License
 
-GNU General Public License v3. See [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE](LICENSE).
